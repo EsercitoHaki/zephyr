@@ -1,1 +1,0 @@
-/usr/bin/clang++ -g -Xlinker --dependency-file=CMakeFiles/game.dir/link.d CMakeFiles/game.dir/main.cpp.o -o game  -Wl,-rpath,/home/esercito/Workspaces/Vulkan/zephyr/build/engine/libs/glfw/src ../libs/glfw/src/libglfw.so.3.5 /lib/libvulkan.so

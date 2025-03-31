@@ -1,3 +1,19 @@
 [submodule "engine/libs/glfw"]
 	path = engine/libs/glfw
-	url = https://github.com/glfw/glfw.git
+	url = https://github.com/glfw/glfw
+
+[submodule "engine/libs/vk-bootstrap"]
+	path = engine/libs/vk-bootstrap
+	url = https://github.com/charles-lunarg/vk-bootstrap
+
+[submodule "engine/libs/VulkanMemoryAllocator"]
+	path = engine/libs/VulkanMemoryAllocator
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
+
+[submodule "engine/libs/imgui"]
+	path = engine/libs/imgui
+	url = https://github.com/ocornut/imgui
+
+[submodule "engine/libs/glm"]
+	path = engine/libs/glm
+	url = https://github.com/g-truc/glm
