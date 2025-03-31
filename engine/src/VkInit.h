@@ -23,7 +23,7 @@ namespace vkinit
     );
 
     VkSubmitInfo2 submitInfo(
-        VkCommandBufferSubmitInfo* cmd,
+        const VkCommandBufferSubmitInfo* cmd,
         VkSemaphoreSubmitInfo* signalSemaphoreInfo,
         VkSemaphoreSubmitInfo* waitSemaphoreInfo
     );

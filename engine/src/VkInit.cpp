@@ -72,7 +72,7 @@ VkCommandBufferSubmitInfo commandBufferSubmitInfo(VkCommandBuffer cmd)
     };
 }
 VkSubmitInfo2 submitInfo(
-    VkCommandBufferSubmitInfo* cmd,
+    const VkCommandBufferSubmitInfo* cmd,
     VkSemaphoreSubmitInfo* signalSemaphoreInfo,
     VkSemaphoreSubmitInfo* waitSemaphoreInfo)
 {
