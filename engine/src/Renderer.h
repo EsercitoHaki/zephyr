@@ -115,4 +115,14 @@ private:
     MeshCache meshCache;
 
     Scene scene;
+
+    bool isRunning{false};
+    bool vSync{true};
+    bool frameLimit{true};
+    float frameTime{0.f};
+    float avgFPS{0.f};
+
+    // Chỉ hiển thị FPT cứ mỗi sau 1s
+    float displayedFPS{0.f};
+    float displayFPSDelay{1.f};
 };

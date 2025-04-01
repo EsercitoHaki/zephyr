@@ -3,6 +3,8 @@
 #include <VkPipelines.h>
 #include <VkUtil.h>
 #include <array>
+#include <chrono>
+#include <thread>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -487,31 +489,118 @@ GPUMeshBuffers Renderer::uploadMesh(
 void Renderer::update(float dt)
 {
     // ImGui::ShowDemoWindow();
-    auto glmToArr = [](const glm::vec4& v) { return std::array<float, 4>{v.x, v.y, v.z, v.w}; };
-    auto arrToGLM = [](const std::array<float, 4>& v) { return glm::vec4{v[0], v[1], v[2], v[3]}; };
-    ImGui::Begin("Gradient");
-    auto from = glmToArr(gradientConstants.data1);
-    if (ImGui::ColorEdit3("From", from.data())) {
-        gradientConstants.data1 = arrToGLM(from);
+    // auto glmToArr = [](const glm::vec4& v) { return std::array<float, 4>{v.x, v.y, v.z, v.w}; };
+    // auto arrToGLM = [](const std::array<float, 4>& v) { return glm::vec4{v[0], v[1], v[2], v[3]}; };
+    // ImGui::Begin("Gradient");
+    // auto from = glmToArr(gradientConstants.data1);
+    // if (ImGui::ColorEdit3("From", from.data())) {
+    //     gradientConstants.data1 = arrToGLM(from);
+    // }
+    // auto to = glmToArr(gradientConstants.data2);
+    // if (ImGui::ColorEdit3("To", to.data())) {
+    //     gradientConstants.data2 = arrToGLM(to);
+    // }
+    // ImGui::End();
+
+    if (displayedFPS > 0.f) {
+        displayFPSDelay -= dt;
+    }else {
+        displayFPSDelay = 1.f;
+        displayedFPS = avgFPS;
     }
-    auto to = glmToArr(gradientConstants.data2);
-    if (ImGui::ColorEdit3("To", to.data())) {
-        gradientConstants.data2 = arrToGLM(to);
+
+    ImGui::Begin("Debug");
+    ImGui::Text("FPS: %d", (int)displayedFPS);
+    if (ImGui::Checkbox("VSync", &vSync)){
+        //TO DO
     }
+    ImGui::Checkbox("Frame limit", &frameLimit);
     ImGui::End();
+
+    {
+        auto glmToArr = [](const glm::vec4& v) {return std::array<float, 4>{v.x, v.y, v.z, v.w}; };
+        auto arrToGLM = [](const std::array<float, 4>& v) {
+            return glm::vec4{v[0], v[1], v[2], v[3]};
+        };
+
+        ImGui::Begin("Gradient");
+
+        auto from = glmToArr(gradientConstants.data1);
+        if (ImGui::ColorEdit3("From", from.data())) {
+            gradientConstants.data1 = arrToGLM(from);
+        }
+
+        auto to = glmToArr(gradientConstants.data2);
+        if (ImGui::ColorEdit3("To", to.data())) {
+            gradientConstants.data2 = arrToGLM(to);
+        }
+
+        ImGui::End();
+    }
 }
 void Renderer::run()
 {
-    while (!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
-        // TODO: swapchain resize
-        ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-        float dt = 0.f; // TODO: compute
-        update(dt);
-        ImGui::Render();
+    // while (!glfwWindowShouldClose(window)) {
+    //     glfwPollEvents();
+    //     // TODO: swapchain resize
+    //     ImGui_ImplVulkan_NewFrame();
+    //     ImGui_ImplGlfw_NewFrame();
+    //     ImGui::NewFrame();
+    //     float dt = 0.f; // TODO: compute
+    //     update(dt);
+    //     ImGui::Render();
+    //     draw();
+    // }
+
+    const float FPS = 60.f;
+    const float dt = 1.f / FPS;
+
+    auto prevTime = std::chrono::high_resolution_clock::now();
+    float accumulator = dt;
+
+    isRunning = true;
+    while (isRunning) {
+        const auto newTime = std::chrono::high_resolution_clock::now();
+        frameTime = std::chrono::duration<float>(newTime - prevTime).count();
+
+        accumulator += frameTime;
+        prevTime = newTime;
+
+        float newFPS = 1.f / frameTime;
+        avgFPS = std::lerp(avgFPS, newFPS, 0.1f);
+
+        if (accumulator > 10 * dt) {
+            accumulator = dt;
+        }
+
+        while (accumulator >= dt) {
+            // event processing
+            // GLFW
+            glfwPollEvents();
+            if (glfwWindowShouldClose(window)) {
+                isRunning = false;
+                return;
+            }
+
+            ImGui_ImplVulkan_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
+
+            update(dt);
+            accumulator -= dt;
+
+            ImGui::Render();
+        }
+
         draw();
+
+        if (frameLimit) {
+            const auto now = std::chrono::high_resolution_clock::now();
+            const auto frameTime = std::chrono::duration<float>(now - prevTime).count();
+            if (dt > frameTime) {
+                std::this_thread::sleep_for(std::chrono::duration<float>(dt - frameTime));
+            }
+        }
     }
 }
 Renderer::FrameData& Renderer::getCurrentFrame()

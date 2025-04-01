@@ -36,6 +36,9 @@ Các bước thực hiện:
     - Gửi Command Buffer đến hàng đợi đồ họa (vkQueueSubmit)
     - Trình bày ảnh lên màn hình (vkQueuePresentKHR)
     
+## Model Loadding
+
+- Sử dụng GLFW thay vì dùng SDL, để có thể tiện xử lý các model 3D
 
 Một số tài liệu liên quan tới đồ họa máy tính:
 - Ray tracing in one weekend
