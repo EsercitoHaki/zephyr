@@ -5,7 +5,21 @@ add_executable(game
     VkDescriptors.cpp
     VkPipelines.cpp
 
+    util/GltfLoader.cpp
+
+    Math/Transform.cpp
+    Math/Util.cpp
+  
+    Graphics/Camera.cpp
+    Graphics/FrustumCulling.cpp
+    Graphics/Mesh.cpp
+    Graphics/SkeletonAnimator.cpp
+    Graphics/Texture.cpp
+  
     OSUtil.cpp
+  
+    MeshCache.cpp
+    MaterialCache.cpp
     
     Renderer.cpp
     main.cpp
@@ -33,6 +47,8 @@ target_link_libraries(game PRIVATE
 
         imgui::imgui
 
+        tinygltf::tinygltf
+
         glm::glm
 )
 
@@ -42,6 +58,7 @@ target_compile_definitions(game
             GLM_FORCE_XYZW_ONLY
             GLM_FORCE_EXPLICIT_CTOR
             GLM_FORCE_DEPTH_ZERO_TO_ONE
+            GLM_ENABLE_EXPERIMENTAL
 )
 
 set(SHADERS
@@ -54,3 +71,8 @@ set(SHADERS
 list(TRANSFORM SHADERS PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/shaders/")
 
 target_shaders(game ${SHADERS})
+
+add_custom_command(TARGET game POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E echo "Copying game assets to $<TARGET_FILE_DIR:game>/assets"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:game>/assets"
+)

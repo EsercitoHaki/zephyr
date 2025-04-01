@@ -17,3 +17,11 @@
 [submodule "engine/libs/glm"]
 	path = engine/libs/glm
 	url = https://github.com/g-truc/glm
+	
+[submodule "engine/libs/tinygltf"]
+	path = engine/libs/tinygltf
+	url = https://github.com/syoyo/tinygltf
+
+[submodule "engine/libs/SDL"]
+	path = engine/libs/SDL
+	url = https://github.com/libsdl-org/SDL
