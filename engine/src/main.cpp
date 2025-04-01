@@ -23,13 +23,11 @@
 //------------------------------------------------------------------\\
 
 #include <Renderer.h>
-#include <OSUtil.h>
+#include <util/OSUtil.h>
 
-#include <filesystem>
 int main()
 {
-    const auto exeDir = osutil::getExecutableDir();
-    std::filesystem::current_path(exeDir);
+    util::setCurrentDirToExeDir();
     Renderer renderer;
     renderer.init();
     renderer.run();

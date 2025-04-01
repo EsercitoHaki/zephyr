@@ -2,18 +2,18 @@
 
 #include <glm/vec2.hpp>
 
-#include <SDL2/SDL_scancode.h>
+#include <GLFW/glfw3.h>
 
 namespace util
 {
-bool isKeyPressed(SDL_Scancode scancode);
+bool isKeyPressed(GLFWwindow* window, int key);
 
 struct StickBindings {
-    SDL_Scancode up;
-    SDL_Scancode down;
-    SDL_Scancode left;
-    SDL_Scancode right;
+    int up;
+    int down;
+    int left;
+    int right;
 };
 
-glm::vec2 getStickState(const StickBindings& bindings);
+glm::vec2 getStickState(GLFWwindow* window, const StickBindings& bindings);
 }

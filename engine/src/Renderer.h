@@ -14,6 +14,10 @@
 #include "MaterialCache.h"
 #include "MeshCache.h"
 
+#include "FreeCameraController.h"
+
+#include <Graphics/Camera.h>
+
 #include <Graphics/Mesh.h>
 #include <Graphics/Scene.h>
 
@@ -62,6 +66,7 @@ private:
         VkBufferUsageFlags usage,
         VmaMemoryUsage memoryUsage) const;
 
+    void handleInput(float dt);
     void update(float dt);
 
     FrameData& getCurrentFrame();
@@ -125,4 +130,7 @@ private:
     // Chỉ hiển thị FPT cứ mỗi sau 1s
     float displayedFPS{0.f};
     float displayFPSDelay{1.f};
+
+    Camera camera;
+    FreeCameraController cameraController;
 };

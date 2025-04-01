@@ -36,8 +36,8 @@ void Renderer::init()
     initPipelines();
     initImGui();
     gradientConstants = ComputePushConstants{
-        .data1 = glm::vec4{1, 0, 0, 1},
-        .data2 = glm::vec4{0, 0, 1, 1},
+        .data1 = glm::vec4{239.f / 255.f, 157.f / 255.f, 8.f / 255.f, 1},
+        .data2 = glm::vec4{85.f / 255.f, 18.f / 255.f, 85.f / 255.f, 1},
     };
     util::LoadContext loadContext{
         .renderer = *this,
@@ -46,6 +46,20 @@ void Renderer::init()
     };
     util::SceneLoader loader;
     loader.loadScene(loadContext, scene, "assets/models/bricks_A.gltf");
+
+    {
+        static const float zNear = 1.f;
+        static const float zFar = 1000.f;
+        static const float fovX = glm::radians(45.f);
+        static const float aspectRatio = (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT;
+
+        camera.init(fovX, zNear, zFar, aspectRatio);
+
+        // camera.setPosition({1.2f, 2.3f, 3.18f});
+        // camera.setYawPitch(-2.75f, 0.45f);
+        camera.setPosition({2.68f, 2.29f, 3.27f});
+        cameraController.setYawPitch(-2.45f, 0.33f);
+    }
 }
 void Renderer::initVulkan()
 {
@@ -486,6 +500,12 @@ GPUMeshBuffers Renderer::uploadMesh(
     destroyBuffer(staging);
     return mesh;
 }
+
+void Renderer::handleInput(float dt)
+{
+    cameraController.handleInput(window, camera);
+}
+
 void Renderer::update(float dt)
 {
     // ImGui::ShowDemoWindow();
@@ -501,7 +521,7 @@ void Renderer::update(float dt)
     //     gradientConstants.data2 = arrToGLM(to);
     // }
     // ImGui::End();
-
+    cameraController.update(camera, dt);
     if (displayedFPS > 0.f) {
         displayFPSDelay -= dt;
     }else {
@@ -515,6 +535,11 @@ void Renderer::update(float dt)
         //TO DO
     }
     ImGui::Checkbox("Frame limit", &frameLimit);
+    const auto cameraPos = camera.getPosition();
+    ImGui::Text("Camera pos: %.2f, %.2f, %.2f", cameraPos.x, cameraPos.y, cameraPos.z);
+    const auto yaw = cameraController.getYaw();
+    const auto pitch = cameraController.getPitch();
+    ImGui::Text("Camera rotation: (yaw) %.2f, (pitch) %.2f", yaw, pitch);
     ImGui::End();
 
     {
@@ -585,7 +610,7 @@ void Renderer::run()
             ImGui_ImplVulkan_NewFrame();
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
-
+            handleInput(dt);
             update(dt);
             accumulator -= dt;
 
@@ -745,16 +770,10 @@ void Renderer::drawGeometry(VkCommandBuffer cmd)
     { // draw rect
 
         const auto& mesh = meshCache.getMesh(scene.nodes[0]->meshIndex);
-        const auto tm = glm::rotate(glm::mat4{1.f}, glm::radians(45.f), glm::vec3{0.f, 1.f, 0.f});
-        const auto view = glm::translate(glm::mat4{1.f}, glm::vec3{0.f, 0.f, -5.f});
-
-        // use reverse depth
-        auto proj = glm::perspective(
-            glm::radians(70.f), (float)drawExtent.width / (float)drawExtent.height, 1000.f, 0.1f);
-        proj[1][1] *= -1; // Y is down in Vulkan's clip space
+        const auto tm = glm::mat4{1.f};
 
         const auto pushConstants = GPUDrawPushConstants{
-            .worldMatrix = proj * view * tm,
+            .worldMatrix = camera.getViewProj() * tm,
             .vertexBuffer = mesh.buffers.vertexBufferAddress,
         };
         vkCmdPushConstants(
