@@ -33,6 +33,8 @@ public:
         VkSemaphore renderSemaphore;
         VkFence renderFence;
         DeletionQueue deletionQueue;
+
+        DescriptorAllocatorGrowable frameDescriptors;
     };
 public:
     void init();
@@ -42,7 +44,17 @@ public:
     GPUMeshBuffers uploadMesh(
         std::span<const std::uint32_t> indices,
         std::span<const Mesh::Vertex> vertices) const;
+
+    AllocatedImage createImage(
+        void* data,
+        VkExtent3D size,
+        VkFormat format,
+        VkImageUsageFlags usage,
+        bool mipMap);
+    
     void destroyBuffer(const AllocatedBuffer& buffer) const;
+
+    void destroyImage(const AllocatedImage& image) const;
 
 private:
     void initVulkan();
@@ -65,6 +77,13 @@ private:
         std::size_t allocSize,
         VkBufferUsageFlags usage,
         VmaMemoryUsage memoryUsage) const;
+
+    
+    AllocatedImage createImage(
+        VkExtent3D size,
+        VkFormat format,
+        VkImageUsageFlags usage,
+        bool mipMap);
 
     void handleInput(float dt);
     void update(float dt);
@@ -116,6 +135,8 @@ private:
     VkPipelineLayout meshPipelineLayout;
     VkPipeline meshPipeline;
 
+    VkDescriptorSetLayout meshMaterialLayout;
+
     MaterialCache materialCache;
     MeshCache meshCache;
 
@@ -133,4 +154,7 @@ private:
 
     Camera camera;
     FreeCameraController cameraController;
+
+    AllocatedImage whiteTexture;
+    VkSampler defaultSamplerNearest;
 };

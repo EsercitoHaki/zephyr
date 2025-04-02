@@ -7,6 +7,7 @@ add_executable(game
 
     util/GltfLoader.cpp
     util/InputUtil.cpp
+    util/ImageLoader.cpp
     util/OSUtil.cpp
 
     Math/Transform.cpp
@@ -53,6 +54,8 @@ target_link_libraries(game PRIVATE
         tinygltf::tinygltf
 
         glm::glm
+
+        stb::image
 )
 
 target_compile_definitions(game
