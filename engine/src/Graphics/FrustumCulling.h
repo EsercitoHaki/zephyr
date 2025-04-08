@@ -5,8 +5,6 @@
 #include <Graphics/Camera.h>
 #include <Math/Sphere.h>
 
-/* Mostly stolen from https://learnopengl.com/Guest-Articles/2021/Scene/Frustum-Culling */
-
 struct Frustum {
     struct Plane {
         Plane() = default;
@@ -37,11 +35,13 @@ struct Frustum {
 
 namespace edge
 {
-std::array<glm::vec3, 8> calculateFrustumCornersWorldSpace(const glm::mat4& viewProj);
-Frustum createFrustumFromCamera(const Camera& camera);
-bool isInFrustum(const Frustum& frustum, const math::Sphere& s);
-math::Sphere calculateBoundingSphereWorld(
-    const glm::mat4& transform,
-    const math::Sphere& s,
-    bool hasSkeleton);
+    std::array<glm::vec3, 8> calculateFrustumCornersWorldSpace(const glm::mat4& viewProj);
+    Frustum createFrustumFromCamera(const Camera& camera);
+    bool isInFrustum(const Frustum& frustum, const math::Sphere& s);
+    
+    math::Sphere calculateBoundingSphereWorld(
+        const glm::mat4& transform,
+        const math::Sphere& s,
+        bool hasSkeleton
+    );
 }

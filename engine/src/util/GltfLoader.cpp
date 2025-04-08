@@ -143,7 +143,6 @@ void loadPrimitive(const tinygltf::Model &model, const std::string &meshName,
   for (std::size_t i = 0; i < positions.size(); ++i) {
     mesh.positions[i] = glm::vec4(positions[i], 1.f);
     mesh.vertices[i].position = positions[i];               // TEMP
-    mesh.vertices[i].color = glm::vec4{1.f, 1.f, 1.f, 1.f}; // TEMP
   }
 
   { // get min and max pos
@@ -262,7 +261,7 @@ void loadMaterial(const util::LoadContext &ctx, Material &material,
             .depth = 1,
         },
         VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_USAGE_SAMPLED_BIT, false);
-        
+
     material.hasDiffuseTexture = true;
 
   } else {
@@ -505,7 +504,12 @@ void SceneLoader::loadScene(const LoadContext &ctx, Scene &scene,
     }
 
     loadMaterial(ctx, material, diffusePath);
-    auto materialId = ctx.materialCache.addMaterial(std::move(material));
+
+    const auto materialId = ctx.materialCache.getFreeMaterialId();
+    material.materialSet = ctx.renderer.writeMaterialData(materialId, material);
+
+    ctx.materialCache.addMaterial(materialId, std::move(material));
+
     materialMapping.emplace(materialIdx, materialId);
   }
 
@@ -521,6 +525,9 @@ void SceneLoader::loadScene(const LoadContext &ctx, Scene &scene,
       // load on CPU
       Mesh cpuMesh;
       loadPrimitive(gltfModel, gltfMesh.name, gltfPrimitive, cpuMesh);
+      if (cpuMesh.indices.empty()) {
+        continue;
+    }
 
       // load to GPU
       GPUMesh gpuMesh;
@@ -585,4 +592,4 @@ void SceneLoader::loadScene(const LoadContext &ctx, Scene &scene,
   }
 }
 
-} // namespace util
+}

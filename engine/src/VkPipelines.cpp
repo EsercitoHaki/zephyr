@@ -11,11 +11,12 @@
 #include "VkInit.h"
 namespace vkutil
 {
-bool loadShaderModule(const char* filePath, VkDevice device, VkShaderModule* outShaderModule)
+void loadShaderModule(const char* filePath, VkDevice device, VkShaderModule* outShaderModule)
 {
     std::ifstream file(filePath, std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
-        return false;
+        std::cout << "Failed to open " << filePath << std::endl;
+        std::exit(1);
     }
 
     const auto fileSize = file.tellg();
@@ -32,10 +33,9 @@ bool loadShaderModule(const char* filePath, VkDevice device, VkShaderModule* out
     };
 
     if (vkCreateShaderModule(device, &info, nullptr, outShaderModule) != VK_SUCCESS) {
-        return false;
+        std::cout << "Failed to load " << filePath << std::endl;
+        std::exit(1);
     }
-
-    return true;
 }
 }
 

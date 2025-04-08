@@ -8,6 +8,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <numeric>
 #include <vulkan/vulkan.h>
 #include <VkBootstrap.h>
 #define GLFW_INCLUDE_VULKAN
@@ -19,10 +20,11 @@
 #include <imgui_impl_vulkan.cpp>
 #include <Graphics/Scene.h>
 #include <util/GltfLoader.h>
+#include "Graphics/FrustumCulling.h"
 namespace
 {
-static constexpr std::uint32_t SCREEN_WIDTH = 1024;
-static constexpr std::uint32_t SCREEN_HEIGHT = 768;
+static constexpr std::uint32_t SCREEN_WIDTH = 1280;
+static constexpr std::uint32_t SCREEN_HEIGHT = 960;
 static constexpr auto NO_TIMEOUT = std::numeric_limits<std::uint64_t>::max();
 }
 void Renderer::init()
@@ -34,13 +36,16 @@ void Renderer::init()
     initImmediateStructures();
     initDescriptors();
     initPipelines();
+
+    allocateMaterialDataBuffer(1000);
+
     initImGui();
 
     { // init nearest sampler
         auto samplerCreateInfo = VkSamplerCreateInfo{
             .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-            .magFilter = VK_FILTER_LINEAR,
-            .minFilter = VK_FILTER_LINEAR,
+            .magFilter = VK_FILTER_NEAREST,
+            .minFilter = VK_FILTER_NEAREST,
         };
         VK_CHECK(vkCreateSampler(device, &samplerCreateInfo, nullptr, &defaultSamplerNearest));
         deletionQueue.pushFunction(
@@ -69,8 +74,31 @@ void Renderer::init()
         .meshCache = meshCache,
         .whiteTexture = whiteTexture,
     };
-    util::SceneLoader loader;
-    loader.loadScene(loadContext, scene, "assets/models/bricks_A.gltf");
+
+    {
+        Scene scene;
+        util::SceneLoader loader;
+        loader.loadScene(loadContext, scene, "assets/models/arrow.gltf");
+        createEntitiesFromScene(scene);
+    }
+
+    {
+      Scene scene;
+      util::SceneLoader loader;
+      loader.loadScene(loadContext, scene, "assets/models/cato.gltf");
+      createEntitiesFromScene(scene);
+
+      const glm::vec3 catoPos{1.4f, 0.f, 0.f};
+      auto& cato = findEntityByName("Cato");
+      cato.transform.position = catoPos;
+    }
+
+    {
+        Scene scene;
+        util::SceneLoader loader;
+        loader.loadScene(loadContext, scene, "assets/models/mug_full.gltf");
+        createEntitiesFromScene(scene);
+    }
 
     {
         static const float zNear = 1.f;
@@ -80,10 +108,9 @@ void Renderer::init()
 
         camera.init(fovX, zNear, zFar, aspectRatio);
 
-        // camera.setPosition({1.2f, 2.3f, 3.18f});
-        // camera.setYawPitch(-2.75f, 0.45f);
-        camera.setPosition({2.68f, 2.29f, 3.27f});
-        cameraController.setYawPitch(-2.45f, 0.33f);
+        const auto startPos = glm::vec3{8.9f, 4.09f, 8.29f};
+        cameraController.setYawPitch(-2.5f, 0.2f);
+        camera.setPosition(startPos);
     }
 }
 void Renderer::initVulkan()
@@ -95,12 +122,29 @@ void Renderer::initVulkan()
                    .require_api_version(1, 3, 0)
                    .build()
                    .value();
+    
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Vulkan app", nullptr, nullptr);
-    assert(window);
-    VK_CHECK(glfwCreateWindowSurface(instance, window, nullptr, &surface));
+    if (!window) {
+        std::cerr << "Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        std::exit(1);
+    }
+
+    // Create Vulkan surface
+    if (!glfwVulkanSupported()) {
+        std::cerr << "Vulkan is not supported by your system!" << std::endl;
+        std::exit(1);
+    }
+    auto res = glfwCreateWindowSurface(instance, window, nullptr, &surface);
+
+    if (res != VK_SUCCESS) {
+        std::cerr << "Failed to create Vulkan surface" << std::endl;
+        std::exit(1);
+    }
+
     const auto features12 = VkPhysicalDeviceVulkan12Features{
         .bufferDeviceAddress = true,
     };
@@ -126,16 +170,22 @@ void Renderer::initVulkan()
     };
     vmaCreateAllocator(&allocatorInfo, &allocator);
     deletionQueue.pushFunction([&]() { vmaDestroyAllocator(allocator); });
+
+    sunlightDir = glm::vec4{0.371477008, 0.470861048, 0.80018419, 0.f};
+    sunlightColorAndIntensity = glm::vec4{213.f / 255.f, 136.f / 255.f, 49.f / 255.f, 0.6f};
+    ambientColorAndIntensity = glm::vec4{0.20784314, 0.592156887, 0.56078434, 0.05f};
 }
+
 void Renderer::createSwapchain(std::uint32_t width, std::uint32_t height)
 {
+    vSync = false;
     swapchain = vkb::SwapchainBuilder{device}
                     .set_desired_format(VkSurfaceFormatKHR{
                         .format = VK_FORMAT_B8G8R8A8_UNORM,
                         .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
                     })
                     .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-                    .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
+                    .set_desired_present_mode(vSync ? VK_PRESENT_MODE_FIFO_KHR : VK_PRESENT_MODE_IMMEDIATE_KHR)
                     .set_desired_extent(width, height)
                     .build()
                     .value();
@@ -267,13 +317,11 @@ void Renderer::initDescriptors()
         deletionQueue.pushFunction([&, i]() { frames[i].frameDescriptors.destroyPools(device); });
     }
 
-    const auto sizes = std::array{
-        DescriptorAllocator::PoolSizeRatio{
-            .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            .ratio = 1.f,
-        },
+    const auto sizes = std::vector<DescriptorAllocatorGrowable::PoolSizeRatio>{
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
     };
-    descriptorAllocator.initPool(device, 10, sizes);
+    descriptorAllocator.init(device, 10, sizes);
     DescriptorLayoutBuilder builder{};
     builder.addBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
     drawImageDescriptorLayout = builder.build(device, VK_SHADER_STAGE_COMPUTE_BIT);
@@ -295,13 +343,32 @@ void Renderer::initDescriptors()
     vkUpdateDescriptorSets(device, 1, &drawImageWrite, 0, nullptr);
     {
         DescriptorLayoutBuilder builder;
-        builder.addBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        builder.addBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+        sceneDataDescriptorLayout = builder.build(device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+
+        deletionQueue.pushFunction([this]() { vkDestroyDescriptorSetLayout(device, sceneDataDescriptorLayout, nullptr); });
+    }
+    {
+        DescriptorLayoutBuilder builder;
+        builder.addBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+        builder.addBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         meshMaterialLayout = builder.build(device, VK_SHADER_STAGE_FRAGMENT_BIT);
 
         deletionQueue.pushFunction(
             [this]() { vkDestroyDescriptorSetLayout(device, meshMaterialLayout, nullptr); });
     }
 }
+
+void Renderer::allocateMaterialDataBuffer(std::size_t numMaterials)
+{
+    materialDataBuffer = createBuffer(
+        numMaterials * sizeof(MaterialData),
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+    deletionQueue.pushFunction([this]() { destroyBuffer(materialDataBuffer); });
+}
+
 void Renderer::initPipelines()
 {
     initBackgroundPipelines();
@@ -323,11 +390,8 @@ void Renderer::initBackgroundPipelines()
         .pPushConstantRanges = &pushContant,
     };
     VK_CHECK(vkCreatePipelineLayout(device, &layout, nullptr, &gradientPipelineLayout));
-    VkShaderModule shader;
-    if (!vkutil::loadShaderModule("shaders/gradient.comp.spv", device, &shader)) {
-        std::cout << "Error while building compute shader" << std::endl;
-        assert(false);
-    }
+    VkShaderModule shader{};
+    vkutil::loadShaderModule("shaders/gradient.comp.spv", device, &shader);
     const auto pipelineCreateInfo = VkComputePipelineCreateInfo{
         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
         .stage =
@@ -349,10 +413,10 @@ void Renderer::initBackgroundPipelines()
 }
 void Renderer::initTrianglePipeline()
 {
-    VkShaderModule vertexShader;
-    assert(vkutil::loadShaderModule("shaders/colored_triangle.vert.spv", device, &vertexShader));
-    VkShaderModule fragShader;
-    assert(vkutil::loadShaderModule("shaders/colored_triangle.frag.spv", device, &fragShader));
+    VkShaderModule vertexShader{};
+    vkutil::loadShaderModule("shaders/colored_triangle.vert.spv", device, &vertexShader);
+    VkShaderModule fragShader{};
+    vkutil::loadShaderModule("shaders/colored_triangle.frag.spv", device, &fragShader);
     const auto pipelineLayoutInfo = vkinit::pipelineLayoutCreateInfo();
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &trianglePipelineLayout));
     trianglePipeline = PipelineBuilder{trianglePipelineLayout}
@@ -375,10 +439,10 @@ void Renderer::initTrianglePipeline()
 }
 void Renderer::initMeshPipeline()
 {
-    VkShaderModule vertexShader;
-    assert(vkutil::loadShaderModule("shaders/mesh.vert.spv", device, &vertexShader));
-    VkShaderModule fragShader;
-    assert(vkutil::loadShaderModule("shaders/mesh.frag.spv", device, &fragShader));
+    VkShaderModule vertexShader{};
+    vkutil::loadShaderModule("shaders/mesh.vert.spv", device, &vertexShader);
+    VkShaderModule fragShader{};
+    vkutil::loadShaderModule("shaders/mesh.frag.spv", device, &fragShader);
     const auto bufferRange = VkPushConstantRange{
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
         .offset = 0,
@@ -387,8 +451,10 @@ void Renderer::initMeshPipeline()
     auto pipelineLayoutInfo = vkinit::pipelineLayoutCreateInfo();
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &bufferRange;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &meshMaterialLayout;
+
+    const auto layouts = std::array{sceneDataDescriptorLayout, meshMaterialLayout};
+    pipelineLayoutInfo.setLayoutCount = layouts.size();
+    pipelineLayoutInfo.pSetLayouts = layouts.data();
 
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &meshPipelineLayout));
     meshPipeline = PipelineBuilder{meshPipelineLayout}
@@ -601,6 +667,35 @@ void Renderer::destroyImage(const AllocatedImage& image) const
     vmaDestroyImage(allocator, image.image, image.allocation);
 }
 
+VkDescriptorSet Renderer::writeMaterialData(MaterialId id, const Material& material)
+{
+    MaterialData* data = (MaterialData*)materialDataBuffer.info.pMappedData;
+    data[id] = MaterialData{
+        .baseColor = material.baseColor,
+        .metalRoughnessFactors = glm::vec4{1.f, 0.5f, 0.f, 0.f},
+    };
+
+    const auto set = descriptorAllocator.allocate(device, meshMaterialLayout);
+
+    DescriptorWriter writer;
+    writer.writeBuffer(
+        0,
+        materialDataBuffer.buffer,
+        sizeof(MaterialData),
+        id * sizeof(MaterialData),
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    writer.writeImage(
+        1,
+        material.diffuseTexture.imageView,
+        defaultSamplerNearest,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+
+    writer.updateSet(device, set);
+
+    return set;
+}
+
 GPUMeshBuffers Renderer::uploadMesh(
     std::span<const std::uint32_t> indices,
     std::span<const Mesh::Vertex> vertices) const
@@ -672,6 +767,14 @@ void Renderer::update(float dt)
     // }
     // ImGui::End();
     cameraController.update(camera, dt);
+    updateEntityTransforms();
+    updateDevTools(dt);
+}
+
+void Renderer::updateDevTools(float dt)
+{
+    auto glmToArr = [](const glm::vec4& v) { return std::array<float, 4>{v.x, v.y, v.z, v.w}; };
+    auto arrToGLM = [](const std::array<float, 4>& v) { return glm::vec4{v[0], v[1], v[2], v[3]}; };
     if (displayedFPS > 0.f) {
         displayFPSDelay -= dt;
     }else {
@@ -690,15 +793,23 @@ void Renderer::update(float dt)
     const auto yaw = cameraController.getYaw();
     const auto pitch = cameraController.getPitch();
     ImGui::Text("Camera rotation: (yaw) %.2f, (pitch) %.2f", yaw, pitch);
+
+    auto ambient = glmToArr(ambientColorAndIntensity);
+    if (ImGui::ColorEdit3("Ambient", ambient.data())) {
+        ambientColorAndIntensity = arrToGLM(ambient);
+    }
+    ImGui::DragFloat("Ambient intensity", &ambientColorAndIntensity.w, 1.f, 0.f, 1.f);
+
+    auto sunlight = glmToArr(sunlightColorAndIntensity);
+    if (ImGui::ColorEdit3("Sunlight", sunlight.data())) {
+        sunlightColorAndIntensity = arrToGLM(sunlight);
+    }
+    ImGui::DragFloat("Sunlight intensity", &sunlightColorAndIntensity.w, 1.f, 0.f, 1.f);
+
     ImGui::End();
 
     {
-        auto glmToArr = [](const glm::vec4& v) {return std::array<float, 4>{v.x, v.y, v.z, v.w}; };
-        auto arrToGLM = [](const std::array<float, 4>& v) {
-            return glm::vec4{v[0], v[1], v[2], v[3]};
-        };
-
-        ImGui::Begin("Gradient");
+      ImGui::Begin("Gradient");
 
         auto from = glmToArr(gradientConstants.data1);
         if (ImGui::ColorEdit3("From", from.data())) {
@@ -767,6 +878,7 @@ void Renderer::run()
             ImGui::Render();
         }
 
+        generateDrawList();
         draw();
 
         if (frameLimit) {
@@ -888,6 +1000,36 @@ void Renderer::drawBackground(VkCommandBuffer cmd)
 }
 void Renderer::drawGeometry(VkCommandBuffer cmd)
 {
+    VkDescriptorSet sceneDescriptor;
+    {
+        auto gpuSceneDataBuffer = createBuffer(
+            sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+        getCurrentFrame().deletionQueue.pushFunction(
+            [this, gpuSceneDataBuffer]() { destroyBuffer(gpuSceneDataBuffer); });
+        auto* sceneData = (GPUSceneData*)gpuSceneDataBuffer.allocation->GetMappedData();
+
+        *sceneData = GPUSceneData{
+            .view = camera.getView(),
+            .proj = camera.getProjection(),
+            .viewProj = camera.getViewProj(),
+            .cameraPos = glm::vec4{camera.getPosition(), 1.f},
+            .ambientColorAndIntensity = ambientColorAndIntensity,
+            .sunlightDirection = sunlightDir,
+            .sunlightColorAndIntensity = sunlightColorAndIntensity,
+        };
+
+        sceneDescriptor =
+            getCurrentFrame().frameDescriptors.allocate(device, sceneDataDescriptorLayout);
+
+        DescriptorWriter writer;
+        writer.writeBuffer(
+            0,
+            gpuSceneDataBuffer.buffer,
+            sizeof(GPUSceneData),
+            0,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+        writer.updateSet(device, sceneDescriptor);
+    }
     const auto colorAttachment =
         vkinit::attachmentInfo(drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_GENERAL);
     const auto depthAttachment =
@@ -897,24 +1039,15 @@ void Renderer::drawGeometry(VkCommandBuffer cmd)
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
 
-    { // bind texture
-        auto imageSet = getCurrentFrame().frameDescriptors.allocate(device, meshMaterialLayout);
-        {
-            const auto& material = materialCache.getMaterial(0);
-
-            DescriptorWriter writer;
-            writer.writeImage(
-                0,
-                material.diffuseTexture.imageView,
-                defaultSamplerNearest,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-
-            writer.updateSet(device, imageSet);
-        }
-        vkCmdBindDescriptorSets(
-            cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipelineLayout, 0, 1, &imageSet, 0, nullptr);
-    }
+    vkCmdBindDescriptorSets(
+        cmd,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        meshPipelineLayout,
+        0,
+        1,
+        &sceneDescriptor,
+        0,
+        nullptr);
 
     const auto viewport = VkViewport{
         .x = 0,
@@ -931,19 +1064,41 @@ void Renderer::drawGeometry(VkCommandBuffer cmd)
     };
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    /* { // draw triangle
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
-        vkCmdDraw(cmd, 3, 1, 0, 0);
-    } */
+    auto prevMaterialIdx = NULL_MATERIAL_ID;
+    auto prevMeshId = NULL_MESH_ID;
 
-    { // draw rect
+    const auto frustum = edge::createFrustumFromCamera(camera);
 
-        const auto& mesh = meshCache.getMesh(scene.nodes[0]->meshIndex);
-        const auto tm = glm::mat4{1.f};
+    for (const auto& dcIdx : sortedDrawCommands) {
+        const auto& dc = drawCommands[dcIdx];
+        if (!edge::isInFrustum(frustum, dc.worldBoundingSphere)) {
+            continue;
+        }
+
+        if (dc.mesh.materialId != prevMaterialIdx) {
+            prevMaterialIdx = dc.mesh.materialId;
+
+            const auto& material = materialCache.getMaterial(dc.mesh.materialId);
+            
+            vkCmdBindDescriptorSets(
+                cmd,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                meshPipelineLayout,
+                1,
+                1,
+                &material.materialSet,
+                0,
+                nullptr);
+        }
+
+        if (dc.meshId != prevMeshId) {
+            prevMeshId = dc.meshId;
+            vkCmdBindIndexBuffer(cmd, dc.mesh.buffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+        }
 
         const auto pushConstants = GPUDrawPushConstants{
-            .worldMatrix = camera.getViewProj() * tm,
-            .vertexBuffer = mesh.buffers.vertexBufferAddress,
+            .transform = dc.transformMatrix,
+            .vertexBuffer = dc.mesh.buffers.vertexBufferAddress,
         };
         vkCmdPushConstants(
             cmd,
@@ -952,8 +1107,8 @@ void Renderer::drawGeometry(VkCommandBuffer cmd)
             0,
             sizeof(GPUDrawPushConstants),
             &pushConstants);
-        vkCmdBindIndexBuffer(cmd, mesh.buffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(cmd, mesh.numIndices, 1, 0, 0, 0);
+
+        vkCmdDrawIndexed(cmd, dc.mesh.numIndices, 1, 0, 0, 0);
     }
     vkCmdEndRendering(cmd);
 }
@@ -969,6 +1124,11 @@ void Renderer::drawImGui(VkCommandBuffer cmd, VkImageView targetImageView)
 void Renderer::cleanup()
 {
     vkDeviceWaitIdle(device);
+
+    for (auto& frameData : frames) {
+        frameData.deletionQueue.flush();
+    }
+
     meshCache.cleanup(*this);
 
     materialCache.cleanup(*this);
@@ -976,7 +1136,7 @@ void Renderer::cleanup()
     deletionQueue.flush();
     destroyCommandBuffers();
     destroySyncStructures();
-    descriptorAllocator.destroyPool(device);
+    descriptorAllocator.destroyPools(device);
     for (auto imageView : swapchainImageViews) {
         vkDestroyImageView(device, imageView, nullptr);
     }
@@ -1004,4 +1164,141 @@ void Renderer::immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& functi
     const auto submit = vkinit::submitInfo(&cmdinfo, nullptr, nullptr);
     VK_CHECK(vkQueueSubmit2(graphicsQueue, 1, &submit, immFence));
     VK_CHECK(vkWaitForFences(device, 1, &immFence, true, NO_TIMEOUT));
+}
+
+void Renderer::createEntitiesFromScene(const Scene& scene)
+{
+    for (const auto& nodePtr : scene.nodes) {
+        if (nodePtr) {
+            createEntitiesFromNode(scene, *nodePtr);
+        }
+    }
+}
+
+Renderer::EntityId Renderer::createEntitiesFromNode(
+    const Scene& scene,
+    const SceneNode& node,
+    EntityId parentId)
+{
+    auto& e = makeNewEntity();
+    e.tag = node.name;
+
+    // transform
+    {
+        e.transform = node.transform;
+        if (parentId == NULL_ENTITY_ID) {
+            e.worldTransform = e.transform.asMatrix();
+        } else {
+            const auto& parent = entities[parentId];
+            e.worldTransform = parent->worldTransform * node.transform.asMatrix();
+        }
+    }
+
+    { // mesh
+        e.meshes = scene.meshes[node.meshIndex].primitives;
+        // TODO: skeleton
+    }
+
+    { // hierarchy
+        e.parentId = parentId;
+        for (const auto& childPtr : node.children) {
+            if (childPtr) {
+                const auto childId = createEntitiesFromNode(scene, *childPtr, e.id);
+                e.children.push_back(childId);
+            }
+        }
+    }
+
+    return e.id;
+}
+
+Renderer::Entity& Renderer::makeNewEntity()
+{
+    entities.push_back(std::make_unique<Entity>());
+    auto& e = *entities.back();
+    e.id = entities.size() - 1;
+    return e;
+}
+
+Renderer::Entity& Renderer::findEntityByName(std::string_view name) const
+{
+    for (const auto& ePtr : entities) {
+        if (ePtr->tag == name) {
+            return *ePtr;
+        }
+    }
+
+    throw std::runtime_error(std::string{"failed to find entity with name "} + std::string{name});
+}
+
+void Renderer::updateEntityTransforms()
+{
+    const auto I = glm::mat4{1.f};
+    for (auto& ePtr : entities) {
+        auto& e = *ePtr;
+        if (e.parentId == NULL_MESH_ID) {
+            updateEntityTransforms(e, I);
+        }
+    }
+}
+
+void Renderer::updateEntityTransforms(Entity& e, const glm::mat4& parentWorldTransform)
+{
+    const auto prevTransform = e.worldTransform;
+    e.worldTransform = parentWorldTransform * e.transform.asMatrix();
+    if (e.worldTransform == prevTransform) {
+        return;
+    }
+
+    for (const auto& childId : e.children) {
+        auto& child = *entities[childId];
+        updateEntityTransforms(child, e.worldTransform);
+    }
+}
+
+void Renderer::generateDrawList()
+{
+    drawCommands.clear();
+
+    for (const auto& ePtr : entities) {
+        const auto& e = *ePtr;
+        const auto transformMat = e.worldTransform;
+
+        for (std::size_t meshIdx = 0; meshIdx < e.meshes.size(); ++meshIdx) {
+            const auto& mesh = meshCache.getMesh(e.meshes[meshIdx]);
+            // TODO: draw frustum culling here
+            const auto& material = materialCache.getMaterial(mesh.materialId);
+
+            const auto worldBoundingSphere =
+                edge::calculateBoundingSphereWorld(transformMat, mesh.boundingSphere, false);
+
+            drawCommands.push_back(DrawCommand{
+                .mesh = mesh,
+                .meshId = e.meshes[meshIdx],
+                .transformMatrix = transformMat,
+                .worldBoundingSphere = worldBoundingSphere,
+            });
+        }
+    }
+
+    sortDrawList();
+}
+
+void Renderer::sortDrawList()
+{
+    sortedDrawCommands.clear();
+    sortedDrawCommands.resize(drawCommands.size());
+    std::iota(sortedDrawCommands.begin(), sortedDrawCommands.end(), 0);
+
+    std::sort(
+        sortedDrawCommands.begin(),
+        sortedDrawCommands.end(),
+        [this](const auto& i1, const auto& i2) {
+            const auto& dc1 = drawCommands[i1];
+            const auto& dc2 = drawCommands[i2];
+            if (dc1.mesh.materialId == dc2.mesh.materialId) {
+                return dc1.meshId < dc2.meshId;
+            }
+            return dc1.mesh.materialId < dc2.mesh.materialId;
+        });
 }

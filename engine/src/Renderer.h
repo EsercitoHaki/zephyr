@@ -2,6 +2,7 @@
 #include <vulkan/vulkan.h>
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <vector>
 #include <DeletionQueue.h>
 #include <VkDescriptors.h>
@@ -23,6 +24,9 @@
 
 class GLFWwindow;
 
+struct Scene;
+struct SceneNode;
+
 class Renderer {
 public:
     static constexpr std::size_t FRAME_OVERLAP = 2;
@@ -36,16 +40,45 @@ public:
 
         DescriptorAllocatorGrowable frameDescriptors;
     };
+
+    static const std::size_t NULL_ENTITY_ID = std::numeric_limits<std::size_t>::max();
+
+    using EntityId = std::size_t;
+
+    struct Entity {
+        EntityId id{NULL_ENTITY_ID};
+        std::string tag;
+
+        Transform transform;
+        glm::mat4 worldTransform{1.f};
+
+        EntityId parentId{NULL_ENTITY_ID};
+        std::vector<EntityId> children;
+
+        std::vector<MeshId> meshes;
+    };
+
+    struct DrawCommand {
+        const GPUMesh& mesh;
+        std::size_t meshId;
+        glm::mat4 transformMatrix;
+        math::Sphere worldBoundingSphere;
+    };
 public:
     void init();
     void run();
     void cleanup();
 
-    GPUMeshBuffers uploadMesh(
+    [[nodiscard]] GPUMeshBuffers uploadMesh(
         std::span<const std::uint32_t> indices,
         std::span<const Mesh::Vertex> vertices) const;
 
-    AllocatedImage createImage(
+    [[nodiscard]] AllocatedBuffer createBuffer(
+        std::size_t allocSize,
+        VkBufferUsageFlags usage,
+        VmaMemoryUsage memoryUsage) const;
+
+    [[nodiscard]] AllocatedImage createImage(
         void* data,
         VkExtent3D size,
         VkFormat format,
@@ -55,6 +88,7 @@ public:
     void destroyBuffer(const AllocatedBuffer& buffer) const;
 
     void destroyImage(const AllocatedImage& image) const;
+    VkDescriptorSet writeMaterialData(MaterialId id, const Material& material);
 
 private:
     void initVulkan();
@@ -63,6 +97,9 @@ private:
     void initSyncStructures();
     void initImmediateStructures();
     void initDescriptors();
+
+    void allocateMaterialDataBuffer(std::size_t numMaterials);
+
     void initPipelines();
     void initBackgroundPipelines();
     void initTrianglePipeline();
@@ -72,12 +109,6 @@ private:
 
     void destroyCommandBuffers();
     void destroySyncStructures();
-
-    AllocatedBuffer createBuffer(
-        std::size_t allocSize,
-        VkBufferUsageFlags usage,
-        VmaMemoryUsage memoryUsage) const;
-
     
     AllocatedImage createImage(
         VkExtent3D size,
@@ -87,6 +118,7 @@ private:
 
     void handleInput(float dt);
     void update(float dt);
+    void updateDevTools(float dt);
 
     FrameData& getCurrentFrame();
     void draw();
@@ -115,7 +147,7 @@ private:
     VkExtent2D drawExtent;
     std::array<FrameData, FRAME_OVERLAP> frames{};
     std::uint32_t frameNumber{0};
-    DescriptorAllocator descriptorAllocator;
+    DescriptorAllocatorGrowable descriptorAllocator;
     VkDescriptorSet drawImageDescriptors;
     VkDescriptorSetLayout drawImageDescriptorLayout;
     VkPipeline gradientPipeline;
@@ -123,6 +155,7 @@ private:
     VkFence immFence;
     VkCommandBuffer immCommandBuffer;
     VkCommandPool immCommandPool;
+
     struct ComputePushConstants {
         glm::vec4 data1;
         glm::vec4 data2;
@@ -132,6 +165,9 @@ private:
     ComputePushConstants gradientConstants;
     VkPipelineLayout trianglePipelineLayout;
     VkPipeline trianglePipeline;
+
+    VkDescriptorSetLayout sceneDataDescriptorLayout;
+
     VkPipelineLayout meshPipelineLayout;
     VkPipeline meshPipeline;
 
@@ -157,4 +193,28 @@ private:
 
     AllocatedImage whiteTexture;
     VkSampler defaultSamplerNearest;
+
+    std::vector<DrawCommand> drawCommands;
+    std::vector<std::size_t> sortedDrawCommands;
+
+    void createEntitiesFromScene(const Scene& scene);
+    EntityId createEntitiesFromNode(
+        const Scene& scene,
+        const SceneNode& node,
+        EntityId parentId = NULL_ENTITY_ID);
+
+    std::vector<std::unique_ptr<Entity>> entities;
+    Entity& makeNewEntity();
+    Entity& findEntityByName(std::string_view name) const;
+
+    void updateEntityTransforms();
+    void updateEntityTransforms(Entity& e, const glm::mat4& parentWorldTransform);
+
+    void generateDrawList();
+    void sortDrawList();
+
+    glm::vec4 ambientColorAndIntensity;
+    glm::vec4 sunlightDir;
+    glm::vec4 sunlightColorAndIntensity;
+    AllocatedBuffer materialDataBuffer;
 };
