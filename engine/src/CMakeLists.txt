@@ -12,20 +12,22 @@ add_executable(game
 
     Math/Transform.cpp
     Math/Util.cpp
-  
+
     Graphics/Camera.cpp
     Graphics/FrustumCulling.cpp
     Graphics/Mesh.cpp
     Graphics/SkeletonAnimator.cpp
     Graphics/Texture.cpp
-  
-  
+
+
     MeshCache.cpp
     MaterialCache.cpp
 
     FreeCameraController.cpp
-    
+
     Renderer.cpp
+    Game.cpp
+
     main.cpp
 )
 

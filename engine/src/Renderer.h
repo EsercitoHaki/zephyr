@@ -2,7 +2,7 @@
 #include <vulkan/vulkan.h>
 #include <array>
 #include <cstdint>
-#include <memory>
+#include <filesystem>
 #include <vector>
 #include <DeletionQueue.h>
 #include <VkDescriptors.h>
@@ -15,17 +15,17 @@
 #include "MaterialCache.h"
 #include "MeshCache.h"
 
-#include "FreeCameraController.h"
-
-#include <Graphics/Camera.h>
-
 #include <Graphics/Mesh.h>
 #include <Graphics/Scene.h>
 
-class GLFWwindow;
+#include "DrawCommand.h"
 
 struct Scene;
 struct SceneNode;
+
+class Camera;
+
+class GLFWwindow;
 
 class Renderer {
 public:
@@ -41,32 +41,9 @@ public:
         DescriptorAllocatorGrowable frameDescriptors;
     };
 
-    static const std::size_t NULL_ENTITY_ID = std::numeric_limits<std::size_t>::max();
-
-    using EntityId = std::size_t;
-
-    struct Entity {
-        EntityId id{NULL_ENTITY_ID};
-        std::string tag;
-
-        Transform transform;
-        glm::mat4 worldTransform{1.f};
-
-        EntityId parentId{NULL_ENTITY_ID};
-        std::vector<EntityId> children;
-
-        std::vector<MeshId> meshes;
-    };
-
-    struct DrawCommand {
-        const GPUMesh& mesh;
-        std::size_t meshId;
-        glm::mat4 transformMatrix;
-        math::Sphere worldBoundingSphere;
-    };
 public:
-    void init();
-    void run();
+    void init(GLFWwindow* window, bool vSync);
+    void draw(const Camera& camera);
     void cleanup();
 
     [[nodiscard]] GPUMeshBuffers uploadMesh(
@@ -83,16 +60,25 @@ public:
         VkExtent3D size,
         VkFormat format,
         VkImageUsageFlags usage,
-        bool mipMap);
-    
+        bool mipMap
+    );
+
     void destroyBuffer(const AllocatedBuffer& buffer) const;
 
     void destroyImage(const AllocatedImage& image) const;
     VkDescriptorSet writeMaterialData(MaterialId id, const Material& material);
 
+
+    void updateDevTools(float dt);
+
+    void beginDrawing();
+    void addDrawCommand(MeshId id, const glm::mat4& transform);
+    void endDrawing();
+
+    Scene loadScene(const std::filesystem::path& path);
 private:
-    void initVulkan();
-    void createSwapchain(std::uint32_t width, std::uint32_t height);
+    void initVulkan(GLFWwindow* window);
+    void createSwapchain(std::uint32_t width, std::uint32_t height, bool vSync);
     void createCommandBuffers();
     void initSyncStructures();
     void initImmediateStructures();
@@ -105,30 +91,24 @@ private:
     void initTrianglePipeline();
     void initMeshPipeline();
 
-    void initImGui();
+    void initImGui(GLFWwindow* window);
 
     void destroyCommandBuffers();
     void destroySyncStructures();
-    
+
     AllocatedImage createImage(
         VkExtent3D size,
         VkFormat format,
         VkImageUsageFlags usage,
-        bool mipMap);
-
-    void handleInput(float dt);
-    void update(float dt);
-    void updateDevTools(float dt);
+        bool mipMap
+    );
 
     FrameData& getCurrentFrame();
-    void draw();
     void drawBackground(VkCommandBuffer cmd);
-    void drawGeometry(VkCommandBuffer cmd);
+    void drawGeometry(VkCommandBuffer cmd, const Camera& camera);
     void drawImGui(VkCommandBuffer cmd, VkImageView targetImageView);
 
     void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function) const;
-
-    GLFWwindow* window{nullptr};
 
     vkb::Instance instance;
     vkb::PhysicalDevice physicalDevice;
@@ -178,43 +158,16 @@ private:
 
     Scene scene;
 
-    bool isRunning{false};
-    bool vSync{true};
-    bool frameLimit{true};
-    float frameTime{0.f};
-    float avgFPS{0.f};
-
-    // Chỉ hiển thị FPT cứ mỗi sau 1s
-    float displayedFPS{0.f};
-    float displayFPSDelay{1.f};
-
-    Camera camera;
-    FreeCameraController cameraController;
-
     AllocatedImage whiteTexture;
     VkSampler defaultSamplerNearest;
-
-    std::vector<DrawCommand> drawCommands;
-    std::vector<std::size_t> sortedDrawCommands;
-
-    void createEntitiesFromScene(const Scene& scene);
-    EntityId createEntitiesFromNode(
-        const Scene& scene,
-        const SceneNode& node,
-        EntityId parentId = NULL_ENTITY_ID);
-
-    std::vector<std::unique_ptr<Entity>> entities;
-    Entity& makeNewEntity();
-    Entity& findEntityByName(std::string_view name) const;
-
-    void updateEntityTransforms();
-    void updateEntityTransforms(Entity& e, const glm::mat4& parentWorldTransform);
-
-    void generateDrawList();
-    void sortDrawList();
 
     glm::vec4 ambientColorAndIntensity;
     glm::vec4 sunlightDir;
     glm::vec4 sunlightColorAndIntensity;
     AllocatedBuffer materialDataBuffer;
+
+    std::vector<DrawCommand> drawCommands;
+    std::vector<std::size_t> sortedDrawCommands;
+
+    void sortDrawList();
 };
