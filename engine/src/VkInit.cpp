@@ -1,4 +1,5 @@
 #include "VkInit.h"
+
 namespace vkinit
 {
 
@@ -71,6 +72,7 @@ VkCommandBufferSubmitInfo commandBufferSubmitInfo(VkCommandBuffer cmd)
         .deviceMask = 0,
     };
 }
+
 VkSubmitInfo2 submitInfo(
     const VkCommandBufferSubmitInfo* cmd,
     VkSemaphoreSubmitInfo* signalSemaphoreInfo,
@@ -86,6 +88,7 @@ VkSubmitInfo2 submitInfo(
         .pSignalSemaphoreInfos = signalSemaphoreInfo,
     };
 }
+
 VkImageCreateInfo imageCreateInfo(VkFormat format, VkImageUsageFlags usageFlags, VkExtent3D extent)
 {
     return VkImageCreateInfo{
@@ -100,6 +103,7 @@ VkImageCreateInfo imageCreateInfo(VkFormat format, VkImageUsageFlags usageFlags,
         .usage = usageFlags,
     };
 }
+
 VkImageViewCreateInfo imageViewCreateInfo(
     VkFormat format,
     VkImage image,
@@ -143,20 +147,20 @@ VkRenderingAttachmentInfo attachmentInfo(
 
 VkRenderingAttachmentInfo depthAttachmentInfo(VkImageView view, VkImageLayout layout)
 {
-  return VkRenderingAttachmentInfo{
-    .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-    .imageView = view,
-    .imageLayout = layout,
-    .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-    .clearValue =
-        {
-      .depthStencil =
-          {
-        .depth = 0.f, // reverse depth
-    },
-},
-};
+    return VkRenderingAttachmentInfo{
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = view,
+        .imageLayout = layout,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue =
+            {
+                .depthStencil =
+                    {
+                        .depth = 0.f, // reverse depth
+                    },
+            },
+    };
 }
 
 VkRenderingInfo renderingInfo(
@@ -177,22 +181,24 @@ VkRenderingInfo renderingInfo(
         .pDepthAttachment = depthAttachment,
     };
 }
+
 VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo()
 {
-  return VkPipelineLayoutCreateInfo{
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-};
+    return VkPipelineLayoutCreateInfo{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+    };
 }
 
 VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo(
     VkShaderStageFlagBits stage,
     VkShaderModule shaderModule)
 {
-  return VkPipelineShaderStageCreateInfo{
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-    .stage = stage,
-    .module = shaderModule,
-    .pName = "main",
-};
+    return VkPipelineShaderStageCreateInfo{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage = stage,
+        .module = shaderModule,
+        .pName = "main",
+    };
 }
+
 }
