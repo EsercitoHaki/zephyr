@@ -51,17 +51,22 @@ void Game::init()
     renderer.init(window, vSync);
 
     {
-        const auto scene = renderer.loadScene("assets/models/bricks_A.gltf");
+        const auto scene = renderer.loadScene("assets/models/kitchen/kitchen.gltf");
         createEntitiesFromScene(scene);
     }
 
     {
-        const auto scene = renderer.loadScene("assets/models/cato.gltf");
-        createEntitiesFromScene(scene);
+        // const auto scene = renderer.loadScene("assets/models/knight/result.gltf");
+        // createEntitiesFromScene(scene);
 
-        const glm::vec3 catoPos{1.4f, 0.f, 0.f};
-        auto& cato = findEntityByName("Cato");
-        cato.transform.position = catoPos;
+        // std::cout << "Các thực thể đã tạo:" << std::endl;
+        // for (const auto& ePtr : entities) {
+        //     std::cout << "- " << ePtr->tag << std::endl;
+        // }
+
+        // const glm::vec3 catoPos{5.f, 5.f, 0.f};
+        // auto& cato = findEntityByName("arrow");
+        // cato.transform.position = catoPos;
     }
 
     {
@@ -77,6 +82,10 @@ void Game::init()
     }
 
     cameraController.setYawPitch(-2.5f, 0.2f);
+
+    sunlightDir = glm::vec4{0.371477008, 0.470861048, 0.80018419, 0.f};
+    sunlightColorAndIntensity = glm::vec4{213.f / 255.f, 136.f / 255.f, 49.f / 255.f, 0.6f};
+    ambientColorAndIntensity = glm::vec4{0.20784314, 0.592156887, 0.56078434, 0.05f};
 }
 
 void Game::run(){
@@ -260,6 +269,24 @@ void Game::updateDevTools(float dt) {
         ImGui::End();
     }
 
+
+  auto glmToArr = [](const glm::vec4& v) { return std::array<float, 4>{v.x, v.y, v.z, v.w}; };
+  auto arrToGLM = [](const std::array<float, 4>& v) { return glm::vec4{v[0], v[1], v[2], v[3]}; };
+
+  auto ambient = glmToArr(ambientColorAndIntensity);
+  if (ImGui::ColorEdit3("Ambient", ambient.data())) {
+    ambientColorAndIntensity = arrToGLM(ambient);
+  }
+  ImGui::DragFloat("Ambient intensity", &ambientColorAndIntensity.w, 1.f, 0.f, 1.f);
+
+  auto sunlight = glmToArr(sunlightColorAndIntensity);
+  if (ImGui::ColorEdit3("Sunlight", sunlight.data())) {
+    sunlightColorAndIntensity = arrToGLM(sunlight);
+  }
+  ImGui::DragFloat("Sunlight intensity", &sunlightColorAndIntensity.w, 1.f, 0.f, 1.f);
+
+  ImGui::End();
+
     renderer.updateDevTools(dt);
 }
 
@@ -354,7 +381,16 @@ void Game::updateEntityTransforms(Entity& e, const glm::mat4& parentWorldTransfo
 }
 
 void Game::generateDrawList() {
-    renderer.beginDrawing();
+  const auto sceneData = GPUSceneData{
+    .view = camera.getView(),
+    .proj = camera.getProjection(),
+    .viewProj = camera.getViewProj(),
+    .cameraPos = glm::vec4{camera.getPosition(), 1.f},
+    .ambientColorAndIntensity = ambientColorAndIntensity,
+    .sunlightDirection = sunlightDir,
+    .sunlightColorAndIntensity = sunlightColorAndIntensity,
+  };
+  renderer.beginDrawing(sceneData);
 
     for (const auto& ePtr : entities) {
         const auto& e = *ePtr;

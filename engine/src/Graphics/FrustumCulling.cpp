@@ -1,5 +1,8 @@
 #include "FrustumCulling.h"
 
+#include <Graphics/Camera.h>
+#include <Math/Sphere.h>
+
 #include <algorithm>
 #include <array>
 
@@ -141,4 +144,4 @@ math::Sphere calculateBoundingSphereWorld(
     return sphereWorld;
 }
 
-} 
+}

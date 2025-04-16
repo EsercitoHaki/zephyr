@@ -9,25 +9,42 @@
 
 class DescriptorLayoutBuilder {
 public:
-  void addBinding(std::uint32_t binding, VkDescriptorType type);
-  void clear();
-  VkDescriptorSetLayout build(VkDevice device, VkShaderStageFlags shaderStages);
+    DescriptorLayoutBuilder& addBinding(std::uint32_t binding, VkDescriptorType type);
+    VkDescriptorSetLayout build(VkDevice device, VkShaderStageFlags shaderStages);
+
+    void clear();
 
 private:
-  std::vector<VkDescriptorSetLayoutBinding> bindings;
+    std::vector<VkDescriptorSetLayoutBinding> bindings;
 };
+
+namespace vkutil
+{
+    struct DescriptorLayoutBinding {
+        std::uint32_t binding;
+        VkDescriptorType type;
+    };
+
+    VkDescriptorSetLayout buildDescriptorSetLayout(
+        VkDevice device,
+        VkShaderStageFlags shaderStages,
+        std::span<const DescriptorLayoutBinding> binding
+    );
+}
 
 class DescriptorAllocatorGrowable {
 public:
-  struct PoolSizeRatio {
-    VkDescriptorType type;
-    float ratio;
-  };
+    struct PoolSizeRatio {
+        VkDescriptorType type;
+        float ratio;
+    };
 
-  void init(VkDevice device, std::uint32_t initialSets,
-            std::span<const PoolSizeRatio> poolRatios);
-  void clearPools(VkDevice device);
-  void destroyPools(VkDevice device);
+    void init(VkDevice device, std::uint32_t initialSets,
+        std::span<const PoolSizeRatio> poolRatios
+    );
+
+    void clearPools(VkDevice device);
+    void destroyPools(VkDevice device);
 
   VkDescriptorSet allocate(VkDevice device, VkDescriptorSetLayout layout);
 

@@ -2,41 +2,66 @@
 #include <cstdint>
 
 #include <fstream>
+#include <span>
 #include <vector>
 #include <array>
 #include <fstream>
 #include <iostream>
 #include <vector>
+#include <vulkan/vulkan_core.h>
 
 #include "VkInit.h"
+#include "VkUtil.h"
 namespace vkutil
 {
-void loadShaderModule(const char* filePath, VkDevice device, VkShaderModule* outShaderModule)
-{
-    std::ifstream file(filePath, std::ios::ate | std::ios::binary);
-    if (!file.is_open()) {
-        std::cout << "Failed to open " << filePath << std::endl;
-        std::exit(1);
+    VkShaderModule loadShaderModule(const char* filePath, VkDevice device)
+    {
+        std::ifstream file(filePath, std::ios::ate | std::ios::binary);
+        if (!file.is_open()) {
+            std::cout << "Failed to open " << filePath << std::endl;
+            std::exit(1);
+        }
+
+        const auto fileSize = file.tellg();
+        std::vector<std::uint32_t> buffer(fileSize / sizeof(std::uint32_t));
+
+        file.seekg(0);
+        file.read((char*)buffer.data(), fileSize);
+        file.close();
+
+        auto info = VkShaderModuleCreateInfo{
+            .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+            .codeSize = buffer.size() * sizeof(std::uint32_t),
+            .pCode = buffer.data(),
+        };
+
+        VkShaderModule shaderModule;
+        if (vkCreateShaderModule(device, &info, nullptr, &shaderModule) != VK_SUCCESS) {
+            std::cout << "Failed to load " << filePath << std::endl;
+            std::exit(1);
+        }
+
+        return shaderModule;
     }
 
-    const auto fileSize = file.tellg();
-    std::vector<std::uint32_t> buffer(fileSize / sizeof(std::uint32_t));
+    VkPipelineLayout createPipelineLayout(
+        VkDevice device,
+        std::span<const VkDescriptorSetLayout> layouts,
+        std::span<const VkPushConstantRange> pushContantRanges
+    )
+    {
+        const auto createInfo = VkPipelineLayoutCreateInfo{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+            .setLayoutCount = (std::uint32_t)layouts.size(),
+            .pSetLayouts = layouts.data(),
+            .pushConstantRangeCount = (std::uint32_t)pushContantRanges.size(),
+            .pPushConstantRanges = pushContantRanges.data(),
+        };
 
-    file.seekg(0);
-    file.read((char*)buffer.data(), fileSize);
-    file.close();
-
-    auto info = VkShaderModuleCreateInfo{
-        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = buffer.size() * sizeof(std::uint32_t),
-        .pCode = buffer.data(),
-    };
-
-    if (vkCreateShaderModule(device, &info, nullptr, outShaderModule) != VK_SUCCESS) {
-        std::cout << "Failed to load " << filePath << std::endl;
-        std::exit(1);
+        VkPipelineLayout layout;
+        VK_CHECK(vkCreatePipelineLayout(device, &createInfo, nullptr, &layout));
+        return layout;
     }
-}
 }
 
 PipelineBuilder::PipelineBuilder(VkPipelineLayout pipelineLayout) : pipelineLayout(pipelineLayout)
@@ -213,4 +238,33 @@ PipelineBuilder& PipelineBuilder::disableDepthTest()
     depthStencil.maxDepthBounds = 1.f;
 
     return *this;
+}
+
+ComputePipelineBuilder::ComputePipelineBuilder(VkPipelineLayout pipelineLayout) :
+    pipelineLayout(pipelineLayout)
+{}
+
+ComputePipelineBuilder& ComputePipelineBuilder::setShader(VkShaderModule shaderModule)
+{
+    this->shaderModule = shaderModule;
+    return *this;
+}
+
+VkPipeline ComputePipelineBuilder::build(VkDevice device)
+{
+    const auto pipelineCreateInfo = VkComputePipelineCreateInfo{
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage =
+            {
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+                .module = shaderModule,
+                .pName = "main",
+            },
+        .layout = pipelineLayout,
+    };
+
+    VkPipeline pipeline;
+    VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineCreateInfo, 0, &pipeline));
+    return pipeline;
 }

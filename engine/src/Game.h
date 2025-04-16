@@ -27,8 +27,6 @@ class Game {
             std::vector<EntityId> children;
 
             std::vector<MeshId> meshes;
-
-
         };
 
     public:
@@ -87,4 +85,8 @@ class Game {
 
         Camera camera;
         FreeCameraController cameraController;
+
+        glm::vec4 ambientColorAndIntensity;
+        glm::vec4 sunlightDir;
+        glm::vec4 sunlightColorAndIntensity;
 };

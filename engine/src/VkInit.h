@@ -7,43 +7,53 @@
 namespace vkinit
 {
 VkImageSubresourceRange imageSubresourceRange(VkImageAspectFlags aspectMask);
-VkFenceCreateInfo fenceCreateInfo(VkFenceCreateFlags flags = 0);
+
 VkSemaphoreSubmitInfo semaphoreSubmitInfo(VkPipelineStageFlags2 stageMask, VkSemaphore semaphore);
 
 VkCommandPoolCreateInfo commandPoolCreateInfo(
     VkCommandPoolCreateFlags flags,
-    std::uint32_t queueFamilyIndex);
+    std::uint32_t queueFamilyIndex
+);
 
-VkCommandBufferBeginInfo commandBufferBeginInfo(VkCommandBufferUsageFlags flags);
 VkCommandBufferSubmitInfo commandBufferSubmitInfo(VkCommandBuffer cmd);
 VkCommandBufferAllocateInfo commandBufferAllocateInfo(
     VkCommandPool commandPool,
-    std::uint32_t commandBufferCount);
+    std::uint32_t commandBufferCount
+);
 
 VkSubmitInfo2 submitInfo(
     const VkCommandBufferSubmitInfo* cmd,
-    VkSemaphoreSubmitInfo* signalSemaphoreInfo,
-    VkSemaphoreSubmitInfo* waitSemaphoreInfo);
+    const VkSemaphoreSubmitInfo* signalSemaphoreInfo,
+    const VkSemaphoreSubmitInfo* waitSemaphoreInfo
+);
 
-VkImageCreateInfo imageCreateInfo(VkFormat format, VkImageUsageFlags usageFlags, VkExtent3D extent);
+VkImageCreateInfo imageCreateInfo(
+    VkFormat format,
+    VkImageUsageFlags usageFlags,
+    VkExtent3D extent,
+    std::uint32_t mipLevels = 1
+);
+
 VkImageViewCreateInfo imageViewCreateInfo(
     VkFormat format,
     VkImage image,
-    VkImageAspectFlags aspectFlags);
+    VkImageAspectFlags aspectFlags
+);
 
 VkRenderingAttachmentInfo attachmentInfo(
     VkImageView view,
     const VkClearValue* clear,
-    VkImageLayout layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    VkImageLayout layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+);
 
 VkRenderingAttachmentInfo depthAttachmentInfo(VkImageView view, VkImageLayout layout);
 
 VkRenderingInfo renderingInfo(
     VkExtent2D renderExtent,
     const VkRenderingAttachmentInfo* colorAttachment,
-    const VkRenderingAttachmentInfo* depthAttachment);
+    const VkRenderingAttachmentInfo* depthAttachment
+);
 
-VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo();
 VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo(
     VkShaderStageFlagBits stage,
     VkShaderModule shaderModule);

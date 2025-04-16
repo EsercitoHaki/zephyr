@@ -2,8 +2,14 @@
 
 #include <array>
 
-#include <Graphics/Camera.h>
-#include <Math/Sphere.h>
+#include <glm/mat4x4.hpp>
+#include <glm/vec3.hpp>
+
+namespace math
+{
+struct Sphere;
+}
+class Camera;
 
 struct Frustum {
     struct Plane {
@@ -38,7 +44,7 @@ namespace edge
     std::array<glm::vec3, 8> calculateFrustumCornersWorldSpace(const glm::mat4& viewProj);
     Frustum createFrustumFromCamera(const Camera& camera);
     bool isInFrustum(const Frustum& frustum, const math::Sphere& s);
-    
+
     math::Sphere calculateBoundingSphereWorld(
         const glm::mat4& transform,
         const math::Sphere& s,
