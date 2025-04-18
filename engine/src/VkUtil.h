@@ -18,7 +18,7 @@ namespace vkutil
         VkImageLayout currentLayout,
         VkImageLayout newLayout
     );
-    
+
     void copyImageToImage(
         VkCommandBuffer cmd,
         VkImage source,

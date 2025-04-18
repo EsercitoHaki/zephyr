@@ -8,7 +8,6 @@
 #include <Graphics/Scene.h>
 #include <Graphics/Skeleton.h>
 #include <Math/Util.h>
-#include <util/ImageLoader.h>
 
 #include <MaterialCache.h>
 #include <MeshCache.h>
@@ -250,17 +249,7 @@ void loadMaterial(const util::LoadContext &ctx, Material &material,
                   const std::filesystem::path &diffusePath) {
   if (!diffusePath.empty()) {
     // TODO: use texture cache and don't load same textures
-    auto data = util::loadImage(diffusePath);
-    assert(data.pixels);
-
-    material.diffuseTexture = ctx.renderer.createImage(
-        data.pixels,
-        VkExtent3D{
-            .width = (std::uint32_t)data.width,
-            .height = (std::uint32_t)data.height,
-            .depth = 1,
-        },
-        VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_USAGE_SAMPLED_BIT, false);
+    material.diffuseTexture = ctx.renderer.loadImageFromFile(diffusePath, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_USAGE_SAMPLED_BIT, false);
 
     material.hasDiffuseTexture = true;
 
@@ -269,10 +258,19 @@ void loadMaterial(const util::LoadContext &ctx, Material &material,
   }
 }
 
-void loadGPUMesh(const util::LoadContext ctx, const Mesh &cpuMesh,
-                 GPUMesh &gpuMesh) {
-  gpuMesh.buffers = ctx.renderer.uploadMesh(cpuMesh.indices, cpuMesh.vertices);
-  gpuMesh.numIndices = cpuMesh.indices.size();
+void loadGPUMesh(const util::LoadContext ctx, const Mesh &cpuMesh, GPUMesh &gpuMesh) {
+    gpuMesh.buffers = ctx.renderer.uploadMesh(cpuMesh.indices, cpuMesh.vertices);
+    gpuMesh.numVertices = cpuMesh.vertices.size();
+    gpuMesh.numIndices = cpuMesh.indices.size();
+
+    if (cpuMesh.hasSkeleton) {
+        gpuMesh.skinnedVertexBuffer = ctx.renderer.createBuffer(
+            cpuMesh.vertices.size() * sizeof(Mesh::Vertex),
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+            VMA_MEMORY_USAGE_GPU_ONLY);
+        gpuMesh.skinnedVertexBufferAddress = ctx.renderer.getBufferAddress(gpuMesh.skinnedVertexBuffer);
+    }
 }
 
 bool shouldSkipNode(const tinygltf::Node &node) {
@@ -494,8 +492,8 @@ void SceneLoader::loadScene(const LoadContext &ctx, Scene &scene,
        ++materialIdx) {
     const auto &gltfMaterial = gltfModel.materials[materialIdx];
     Material material{
-        .name = gltfMaterial.name,
         .baseColor = getDiffuseColor(gltfMaterial),
+        .name = gltfMaterial.name,
     };
 
     std::filesystem::path diffusePath;

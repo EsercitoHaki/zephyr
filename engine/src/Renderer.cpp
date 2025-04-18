@@ -8,11 +8,12 @@
 #include <iostream>
 #include <limits>
 #include <numeric>
+#include <algorithm>
 #include <vulkan/vulkan.h>
 #include <VkBootstrap.h>
+#include <vulkan/vulkan_core.h>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
-#define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
 #include <imgui.h>
 #include <imgui_impl_glfw.cpp>
@@ -20,6 +21,7 @@
 #include <Graphics/Scene.h>
 #include <util/GltfLoader.h>
 #include "Graphics/FrustumCulling.h"
+#include <util/ImageLoader.h>
 namespace
 {
     static constexpr auto NO_TIMEOUT = std::numeric_limits<std::uint64_t>::max();
@@ -60,6 +62,7 @@ void Renderer::initVulkan(GLFWwindow* window)
                    .build()
                    .value();
 
+    loadExtensionFunctions();
     // glfwInit();
     // glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     // glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
@@ -96,6 +99,8 @@ void Renderer::initVulkan(GLFWwindow* window)
                          .set_surface(surface)
                          .select()
                          .value();
+    std::vector<const char*> enabledExtensions = {"VK_EXT_DEBUG_MARKER_EXTENSION_NAME"};
+    VkDeviceCreateInfo deviceInfo = {};
     device = vkb::DeviceBuilder{physicalDevice}.build().value();
     graphicsQueue = device.get_queue(vkb::QueueType::graphics).value();
     graphicsQueueFamily = device.get_queue_index(vkb::QueueType::graphics).value();
@@ -107,6 +112,22 @@ void Renderer::initVulkan(GLFWwindow* window)
     };
     vmaCreateAllocator(&allocatorInfo, &allocator);
     deletionQueue.pushFunction([&]() { vmaDestroyAllocator(allocator); });
+}
+
+void Renderer::loadExtensionFunctions()
+{
+    pfnSetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)
+        vkGetInstanceProcAddr(instance, "vkSetDebugUtilsObjectNameEXT");
+    pfnQueueBeginDebugUtilsLabelEXT = (PFN_vkQueueBeginDebugUtilsLabelEXT)
+        vkGetInstanceProcAddr(instance, "vkQueueBeginDebugUtilsLabelEXT");
+    pfnQueueEndDebugUtilsLabelEXT = (PFN_vkQueueEndDebugUtilsLabelEXT)
+        vkGetInstanceProcAddr(instance, "vkQueueEndDebugUtilsLabelEXT");
+    pfnCmdBeginDebugUtilsLabelEXT = (PFN_vkCmdBeginDebugUtilsLabelEXT)
+        vkGetInstanceProcAddr(instance, "vkCmdBeginDebugUtilsLabelEXT");
+    pfnCmdEndDebugUtilsLabelEXT = (PFN_vkCmdEndDebugUtilsLabelEXT)
+        vkGetInstanceProcAddr(instance, "vkCmdEndDebugUtilsLabelEXT");
+    pfnCmdInsertDebugUtilsLabelEXT = (PFN_vkCmdInsertDebugUtilsLabelEXT)
+        vkGetInstanceProcAddr(instance, "vkCmdInsertDebugUtilsLabelEXT");
 }
 
 void Renderer::createSwapchain(std::uint32_t width, std::uint32_t height, bool vSync)
@@ -313,6 +334,8 @@ void Renderer::allocateMaterialDataBuffer(std::size_t numMaterials)
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
         VMA_MEMORY_USAGE_CPU_TO_GPU);
 
+    addDebugLabel(materialDataBuffer, "material data");
+
     deletionQueue.pushFunction([this]() { destroyBuffer(materialDataBuffer); });
 }
 
@@ -348,6 +371,7 @@ void Renderer::initDefaultTextures()
 void Renderer::initPipelines()
 {
     initBackgroundPipelines();
+    initSkinningPipeline();
     initTrianglePipeline();
     initMeshPipeline();
 }
@@ -363,6 +387,7 @@ void Renderer::initBackgroundPipelines()
     gradientPipelineLayout = vkutil::createPipelineLayout(device, layouts, pushConstants);
 
     const auto shader = vkutil::loadShaderModule("shaders/gradient.comp.spv", device);
+    addDebugLabel(shader, "gradient");
 
     gradientPipeline = ComputePipelineBuilder{gradientPipelineLayout}.setShader(shader).build(device);
     vkDestroyShaderModule(device, shader, nullptr);
@@ -372,6 +397,32 @@ void Renderer::initBackgroundPipelines()
         vkDestroyPipeline(device, gradientPipeline, nullptr);
     });
 }
+
+void Renderer::initSkinningPipeline()
+{
+    const auto pushConstant = VkPushConstantRange{
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        .offset = 0,
+        .size = sizeof(SkinningPushConstants),
+    };
+
+    const auto pushConstants = std::array{pushConstant};
+    skinningPipelineLayout = vkutil::createPipelineLayout(device, {}, pushConstants);
+
+    const auto shader = vkutil::loadShaderModule("shaders/skinning.comp.spv", device);
+    addDebugLabel(shader, "skinning");
+
+    skinningPipeline =
+        ComputePipelineBuilder{skinningPipelineLayout}.setShader(shader).build(device);
+
+    vkDestroyShaderModule(device, shader, nullptr);
+
+    deletionQueue.pushFunction([this]() {
+        vkDestroyPipelineLayout(device, skinningPipelineLayout, nullptr);
+        vkDestroyPipeline(device, skinningPipeline, nullptr);
+    });
+}
+
 void Renderer::initTrianglePipeline()
 {
     const auto vertexShader = vkutil::loadShaderModule("shaders/colored_triangle.vert.spv", device);
@@ -399,6 +450,8 @@ void Renderer::initMeshPipeline()
 {
     const auto vertexShader = vkutil::loadShaderModule("shaders/mesh.vert.spv", device);
     const auto fragShader = vkutil::loadShaderModule("shaders/mesh.frag.spv", device);
+    addDebugLabel(vertexShader, "mesh.vert");
+    addDebugLabel(vertexShader, "mesh.frag");
     const auto bufferRange = VkPushConstantRange{
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
         .offset = 0,
@@ -419,6 +472,8 @@ void Renderer::initMeshPipeline()
                        .setDepthFormat(depthImage.format)
                        .enableDepthTest(true, VK_COMPARE_OP_GREATER_OR_EQUAL)
                        .build(device);
+
+    addDebugLabel(meshPipeline, "mesh pipeline");
 
     vkDestroyShaderModule(device, vertexShader, nullptr);
     vkDestroyShaderModule(device, fragShader, nullptr);
@@ -509,6 +564,15 @@ AllocatedBuffer Renderer::createBuffer(
     VK_CHECK(vmaCreateBuffer(
         allocator, &bufferInfo, &allocInfo, &buffer.buffer, &buffer.allocation, &buffer.info));
     return buffer;
+}
+
+[[nodiscard]] VkDeviceAddress Renderer::getBufferAddress(const AllocatedBuffer& buffer) const
+{
+    const auto deviceAdressInfo = VkBufferDeviceAddressInfo{
+        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+        .buffer = buffer.buffer,
+    };
+    return vkGetBufferDeviceAddress(device, &deviceAdressInfo);
 }
 
 AllocatedImage Renderer::createImage(
@@ -609,6 +673,79 @@ AllocatedImage Renderer::createImage(
     return image;
 }
 
+AllocatedImage Renderer::loadImageFromFile(
+    const std::filesystem::path& path,
+    VkFormat format,
+    VkImageUsageFlags usage,
+    bool mipMap)
+{
+    auto data = util::loadImage(path);
+    assert(data.pixels);
+
+    auto image = createImage(
+        data.pixels,
+        VkExtent3D{
+            .width = (std::uint32_t)data.width,
+            .height = (std::uint32_t)data.height,
+            .depth = 1,
+        },
+        format,
+        usage,
+        false);
+
+    addDebugLabel(image, path.c_str());
+
+    return image;
+}
+
+void Renderer::addDebugLabel(const AllocatedImage& image, const char* label)
+{
+    assert(pfnSetDebugUtilsObjectNameEXT);
+    const auto nameInfo = VkDebugUtilsObjectNameInfoEXT{
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+        .objectType = VK_OBJECT_TYPE_IMAGE,
+        .objectHandle = (std::uint64_t)image.image,
+        .pObjectName = label,
+    };
+    pfnSetDebugUtilsObjectNameEXT(device, &nameInfo);
+}
+
+void Renderer::addDebugLabel(const VkShaderModule& shader, const char* label)
+{
+    assert(pfnSetDebugUtilsObjectNameEXT);
+    const auto nameInfo = VkDebugUtilsObjectNameInfoEXT{
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+        .objectType = VK_OBJECT_TYPE_SHADER_MODULE,
+        .objectHandle = (std::uint64_t)shader,
+        .pObjectName = label,
+    };
+    pfnSetDebugUtilsObjectNameEXT(device, &nameInfo);
+}
+
+void Renderer::addDebugLabel(const VkPipeline& pipeline, const char* label)
+{
+    assert(pfnSetDebugUtilsObjectNameEXT);
+    const auto nameInfo = VkDebugUtilsObjectNameInfoEXT{
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+        .objectType = VK_OBJECT_TYPE_PIPELINE,
+        .objectHandle = (std::uint64_t)pipeline,
+        .pObjectName = label,
+    };
+    pfnSetDebugUtilsObjectNameEXT(device, &nameInfo);
+}
+
+void Renderer::addDebugLabel(const AllocatedBuffer& buffer, const char* label)
+{
+    assert(pfnSetDebugUtilsObjectNameEXT);
+    const auto nameInfo = VkDebugUtilsObjectNameInfoEXT{
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+        .objectType = VK_OBJECT_TYPE_BUFFER,
+        .objectHandle = (std::uint64_t)buffer.buffer,
+        .pObjectName = label,
+    };
+    pfnSetDebugUtilsObjectNameEXT(device, &nameInfo);
+}
+
 void Renderer::destroyBuffer(const AllocatedBuffer& buffer) const
 {
     vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
@@ -618,6 +755,24 @@ void Renderer::destroyImage(const AllocatedImage& image) const
 {
     vkDestroyImageView(device, image.imageView, nullptr);
     vmaDestroyImage(allocator, image.image, image.allocation);
+}
+
+void Renderer::beginCmdLabel(VkCommandBuffer cmd, const char* label)
+{
+    const VkDebugUtilsLabelEXT houseLabel = {
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+        .pLabelName = label,
+        .color = {1.0f, 1.0f, 1.0f, 1.0f},
+    };
+
+    assert(pfnCmdBeginDebugUtilsLabelEXT);
+    pfnCmdBeginDebugUtilsLabelEXT(cmd, &houseLabel);
+}
+
+void Renderer::endCmdLabel(VkCommandBuffer cmd)
+{
+    assert(pfnCmdEndDebugUtilsLabelEXT);
+    pfnCmdEndDebugUtilsLabelEXT(cmd);
 }
 
 VkDescriptorSet Renderer::writeMaterialData(MaterialId id, const Material& material)
@@ -667,18 +822,15 @@ GPUMeshBuffers Renderer::uploadMesh(
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         VMA_MEMORY_USAGE_GPU_ONLY);
-    // find the adress of the vertex buffer
-    const auto deviceAdressInfo = VkBufferDeviceAddressInfo{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-        .buffer = mesh.vertexBuffer.buffer,
-    };
-    mesh.vertexBufferAddress = vkGetBufferDeviceAddress(device, &deviceAdressInfo);
+
+    mesh.vertexBufferAddress = getBufferAddress(mesh.vertexBuffer);
+
     const auto staging = createBuffer(
         vertexBufferSize + indexBufferSize,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VMA_MEMORY_USAGE_CPU_ONLY);
     // copy data
-    void* data = staging.allocation->GetMappedData();
+    void* data = staging.info.pMappedData;
     memcpy(data, vertices.data(), vertexBufferSize);
     memcpy((char*)data + vertexBufferSize, indices.data(), indexBufferSize);
     immediateSubmit([&](VkCommandBuffer cmd) {
@@ -742,14 +894,32 @@ void Renderer::draw(const Camera& camera)
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
     vkutil::
         transitionImage(cmd, drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+        beginCmdLabel(cmd, "Skinning");
+        for (const auto& dc : drawCommands) {
+            auto& mesh = meshCache.getMesh(dc.meshId);
+            if (mesh.hasSkeleton) {
+                doSkinning(cmd, mesh);
+            }
+        }
+        endCmdLabel(cmd);
+
+    beginCmdLabel(cmd, "Draw background");
+
     drawBackground(cmd);
+
+    endCmdLabel(cmd);
 
     vkutil::transitionImage(
         cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     vkutil::transitionImage(
         cmd, depthImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
+    beginCmdLabel(cmd, "Draw geometry");
+
     drawGeometry(cmd, camera);
+
+    endCmdLabel(cmd);
 
     vkutil::transitionImage(
         cmd,
@@ -765,6 +935,8 @@ void Renderer::draw(const Camera& camera)
         currentFrame.swapchainSemaphore,
         VK_NULL_HANDLE,
         &swapchainImageIndex));
+
+
     auto& swapchainImage = swapchainImages[swapchainImageIndex];
     // copy from draw image
     vkutil::transitionImage(
@@ -775,7 +947,13 @@ void Renderer::draw(const Camera& camera)
         swapchainImage,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+    beginCmdLabel(cmd, "Draw Dear ImGui");
+
     drawImGui(cmd, swapchainImageViews[swapchainImageIndex]);
+
+    endCmdLabel(cmd);
+
     // prepare for present
     vkutil::transitionImage(
         cmd,
@@ -809,6 +987,27 @@ void Renderer::draw(const Camera& camera)
     }
     frameNumber++;
 }
+
+void Renderer::doSkinning(VkCommandBuffer cmd, const GPUMesh& mesh)
+{
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, skinningPipeline);
+    const auto cs = SkinningPushConstants{
+        .numVertices = mesh.numVertices,
+        .inputBuffer = mesh.buffers.vertexBufferAddress,
+        .outputBuffer = mesh.skinnedVertexBufferAddress,
+    };
+    vkCmdPushConstants(
+        cmd,
+        skinningPipelineLayout,
+        VK_SHADER_STAGE_COMPUTE_BIT,
+        0,
+        sizeof(SkinningPushConstants),
+        &cs);
+
+    static const auto workgroupSize = 256;
+    vkCmdDispatch(cmd, std::ceil(mesh.numVertices / (float)workgroupSize), 1, 1);
+}
+
 void Renderer::drawBackground(VkCommandBuffer cmd)
 {
     /* auto flash = std::abs(std::sin(frameNumber / 120.f));
@@ -884,10 +1083,11 @@ void Renderer::drawGeometry(VkCommandBuffer cmd, const Camera& camera)
             continue;
         }
 
-        if (dc.mesh.materialId != prevMaterialIdx) {
-            prevMaterialIdx = dc.mesh.materialId;
+        auto& mesh = meshCache.getMesh(dc.meshId);
+        if (mesh.materialId != prevMaterialIdx) {
+            prevMaterialIdx = mesh.materialId;
 
-            const auto& material = materialCache.getMaterial(dc.mesh.materialId);
+            const auto& material = materialCache.getMaterial(mesh.materialId);
 
             vkCmdBindDescriptorSets(
                 cmd,
@@ -902,12 +1102,12 @@ void Renderer::drawGeometry(VkCommandBuffer cmd, const Camera& camera)
 
         if (dc.meshId != prevMeshId) {
             prevMeshId = dc.meshId;
-            vkCmdBindIndexBuffer(cmd, dc.mesh.buffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdBindIndexBuffer(cmd, mesh.buffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
         }
 
         const auto pushConstants = GPUDrawPushConstants{
             .transform = dc.transformMatrix,
-            .vertexBuffer = dc.mesh.buffers.vertexBufferAddress,
+            .vertexBuffer = mesh.buffers.vertexBufferAddress,
         };
         vkCmdPushConstants(
             cmd,
@@ -917,7 +1117,7 @@ void Renderer::drawGeometry(VkCommandBuffer cmd, const Camera& camera)
             sizeof(GPUDrawPushConstants),
             &pushConstants);
 
-        vkCmdDrawIndexed(cmd, dc.mesh.numIndices, 1, 0, 0, 0);
+        vkCmdDrawIndexed(cmd, mesh.numIndices, 1, 0, 0, 0);
     }
     vkCmdEndRendering(cmd);
 }
@@ -928,9 +1128,11 @@ VkDescriptorSet Renderer::uploadSceneData()
 
     const auto gpuSceneDataBuffer = createBuffer(
         sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    addDebugLabel(gpuSceneDataBuffer, "scene data");
+
     currentFrame.deletionQueue.pushFunction(
         [this, gpuSceneDataBuffer]() { destroyBuffer(gpuSceneDataBuffer); });
-    auto* sceneData = (GPUSceneData*)gpuSceneDataBuffer.allocation->GetMappedData();
+    auto* sceneData = (GPUSceneData*)gpuSceneDataBuffer.info.pMappedData;
     *sceneData = this->sceneData;
 
     const auto sceneDescriptor =
@@ -1012,7 +1214,6 @@ void Renderer::addDrawCommand(MeshId id, const glm::mat4& transform)
         edge::calculateBoundingSphereWorld(transform, mesh.boundingSphere, false);
 
     drawCommands.push_back(DrawCommand{
-        .mesh = mesh,
         .meshId = id,
         .transformMatrix = transform,
         .worldBoundingSphere = worldBoundingSphere,
@@ -1026,22 +1227,23 @@ void Renderer::endDrawing()
 
 void Renderer::sortDrawList()
 {
-    sortedDrawCommands.clear();
-    sortedDrawCommands.resize(drawCommands.size());
-    std::iota(sortedDrawCommands.begin(), sortedDrawCommands.end(), 0);
+  sortedDrawCommands.clear();
+  sortedDrawCommands.resize(drawCommands.size());
+  std::iota(sortedDrawCommands.begin(), sortedDrawCommands.end(), 0);
 
-    std::sort(
-        sortedDrawCommands.begin(),
-        sortedDrawCommands.end(),
-        [this](const auto& i1, const auto& i2) {
-            const auto& dc1 = drawCommands[i1];
-            const auto& dc2 = drawCommands[i2];
-            if (dc1.mesh.materialId == dc2.mesh.materialId) {
-                return dc1.meshId < dc2.meshId;
-            }
-            return dc1.mesh.materialId < dc2.mesh.materialId;
-        }
-    );
+  std::sort(
+      sortedDrawCommands.begin(),
+      sortedDrawCommands.end(),
+      [this](const auto& i1, const auto& i2) {
+          const auto& dc1 = drawCommands[i1];
+          const auto& dc2 = drawCommands[i2];
+          const auto& mesh1 = meshCache.getMesh(dc1.meshId);
+          const auto& mesh2 = meshCache.getMesh(dc2.meshId);
+          if (mesh1.materialId == mesh2.materialId) {
+              return dc1.meshId < dc2.meshId;
+          }
+          return mesh1.materialId < mesh2.materialId;
+      });
 }
 
 Scene Renderer::loadScene(const std::filesystem::path& path)
