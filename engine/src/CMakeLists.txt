@@ -4,6 +4,7 @@ add_executable(game
     VkUtil.cpp
     VkDescriptors.cpp
     VkPipelines.cpp
+    VmaImpl.cpp
 
     util/GltfLoader.cpp
     util/InputUtil.cpp
@@ -70,11 +71,12 @@ target_compile_definitions(game
 )
 
 set(SHADERS
-        colored_triangle.vert
-        colored_triangle.frag
-        mesh.vert
-        mesh.frag
-        gradient.comp
+    colored_triangle.vert
+    colored_triangle.frag
+    skinning.comp
+    mesh.vert
+    mesh.frag
+    gradient.comp
 )
 list(TRANSFORM SHADERS PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/shaders/")
 

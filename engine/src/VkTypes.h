@@ -13,7 +13,7 @@ struct AllocatedImage {
     VkFormat format;
 };
 struct AllocatedBuffer {
-    VkBuffer buffer;
+    VkBuffer buffer{VK_NULL_HANDLE};
     VmaAllocation allocation;
     VmaAllocationInfo info;
 };
@@ -21,7 +21,7 @@ struct AllocatedBuffer {
 struct GPUMeshBuffers {
     AllocatedBuffer indexBuffer;
     AllocatedBuffer vertexBuffer;
-    VkDeviceAddress vertexBufferAddress;
+    VkDeviceAddress vertexBufferAddress{};
 };
 struct GPUDrawPushConstants {
     glm::mat4 transform;

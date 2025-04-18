@@ -3,11 +3,13 @@
 #include <Math/Sphere.h>
 #include <glm/mat4x4.hpp>
 
-struct GPUMesh;
+#include <Math/Sphere.h>
+
+#include <Graphics/IdTypes.h>
 
 struct DrawCommand {
-    const GPUMesh& mesh;
-    std::size_t meshId;
+    MeshId meshId;
+
     glm::mat4 transformMatrix;
     math::Sphere worldBoundingSphere;
 };
