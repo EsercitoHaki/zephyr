@@ -1,19 +1,16 @@
 #pragma once
 
-#include <limits>
-
 #include <glm/vec3.hpp>
 
-#include <Graphics/Material.h>
 #include <Math/Sphere.h>
+
+#include <Graphics/IdTypes.h>
 
 #include <VkTypes.h>
 
-using MeshId = std::size_t;
-static const auto NULL_MESH_ID = std::numeric_limits<std::size_t>::max();
-
 struct GPUMesh {
     GPUMeshBuffers buffers;
+    std::uint32_t numVertices{0};
     std::uint32_t numIndices{0};
 
     MaterialId materialId{NULL_MATERIAL_ID};
@@ -24,4 +21,7 @@ struct GPUMesh {
     math::Sphere boundingSphere;
 
     bool hasSkeleton{false};
+
+    AllocatedBuffer skinnedVertexBuffer;
+    VkDeviceAddress skinnedVertexBufferAddress;
 };

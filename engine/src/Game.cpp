@@ -1,5 +1,5 @@
 #include "Game.h"
-#include "Graphics/GPUMesh.h"
+
 #include "glm/ext/matrix_float4x4.hpp"
 
 #include <GLFW/glfw3.h>
@@ -56,17 +56,12 @@ void Game::init()
     }
 
     {
-        // const auto scene = renderer.loadScene("assets/models/knight/result.gltf");
-        // createEntitiesFromScene(scene);
+        const auto scene = renderer.loadScene("assets/models/cato.gltf");
+        createEntitiesFromScene(scene);
 
-        // std::cout << "Các thực thể đã tạo:" << std::endl;
-        // for (const auto& ePtr : entities) {
-        //     std::cout << "- " << ePtr->tag << std::endl;
-        // }
-
-        // const glm::vec3 catoPos{5.f, 5.f, 0.f};
-        // auto& cato = findEntityByName("arrow");
-        // cato.transform.position = catoPos;
+        const glm::vec3 catoPos{6.f, 0.5f, 0.f};
+        auto& cato = findEntityByName("Cato");
+        cato.transform.position = catoPos;
     }
 
     {

@@ -57,6 +57,8 @@ public:
         VkBufferUsageFlags usage,
         VmaMemoryUsage memoryUsage) const;
 
+    [[nodiscard]] VkDeviceAddress getBufferAddress(const AllocatedBuffer& buffer) const;
+
     [[nodiscard]] AllocatedImage createImage(
         void* data,
         VkExtent3D size,
@@ -64,6 +66,21 @@ public:
         VkImageUsageFlags usage,
         bool mipMap
     );
+
+    [[nodiscard]] AllocatedImage loadImageFromFile(
+        const std::filesystem::path& path,
+        VkFormat format,
+        VkImageUsageFlags usage,
+        bool mipMap
+    );
+
+    void addDebugLabel(const AllocatedImage& image, const char* label);
+    void addDebugLabel(const VkShaderModule& shader, const char* label);
+    void addDebugLabel(const VkPipeline& pipeline, const char* label);
+    void addDebugLabel(const AllocatedBuffer& buffer, const char* label);
+
+    void beginCmdLabel(VkCommandBuffer cmd, const char* label);
+    void endCmdLabel(VkCommandBuffer cmd);
 
     void destroyBuffer(const AllocatedBuffer& buffer) const;
 
@@ -80,6 +97,7 @@ public:
     Scene loadScene(const std::filesystem::path& path);
 private:
     void initVulkan(GLFWwindow* window);
+    void loadExtensionFunctions();
     void createSwapchain(std::uint32_t width, std::uint32_t height, bool vSync);
     void createCommandBuffers();
     void initSyncStructures();
@@ -93,6 +111,7 @@ private:
 
     void initPipelines();
     void initBackgroundPipelines();
+    void initSkinningPipeline();
     void initTrianglePipeline();
     void initMeshPipeline();
 
@@ -109,6 +128,7 @@ private:
     );
 
     FrameData& getCurrentFrame();
+    void doSkinning(VkCommandBuffer cmd, const GPUMesh& mesh);
     void drawBackground(VkCommandBuffer cmd);
     void drawGeometry(VkCommandBuffer cmd, const Camera& camera);
     VkDescriptorSet uploadSceneData();
@@ -158,6 +178,15 @@ private: //data
         glm::vec4 data4;
     };
     ComputePushConstants gradientConstants;
+
+    VkPipeline skinningPipeline;
+    VkPipelineLayout skinningPipelineLayout;
+    struct SkinningPushConstants {
+        std::uint32_t numVertices;
+        VkDeviceAddress inputBuffer;
+        VkDeviceAddress outputBuffer;
+    };
+
     VkPipelineLayout trianglePipelineLayout;
     VkPipeline trianglePipeline;
 
@@ -181,4 +210,11 @@ private: //data
 
     std::vector<DrawCommand> drawCommands;
     std::vector<std::size_t> sortedDrawCommands;
+
+    PFN_vkSetDebugUtilsObjectNameEXT pfnSetDebugUtilsObjectNameEXT;
+    PFN_vkQueueBeginDebugUtilsLabelEXT pfnQueueBeginDebugUtilsLabelEXT;
+    PFN_vkQueueEndDebugUtilsLabelEXT pfnQueueEndDebugUtilsLabelEXT;
+    PFN_vkCmdBeginDebugUtilsLabelEXT pfnCmdBeginDebugUtilsLabelEXT;
+    PFN_vkCmdEndDebugUtilsLabelEXT pfnCmdEndDebugUtilsLabelEXT;
+    PFN_vkCmdInsertDebugUtilsLabelEXT pfnCmdInsertDebugUtilsLabelEXT;
 };

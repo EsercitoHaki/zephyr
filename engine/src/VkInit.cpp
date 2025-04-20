@@ -1,5 +1,4 @@
 #include "VkInit.h"
-#include <span>
 
 namespace vkinit
 {
