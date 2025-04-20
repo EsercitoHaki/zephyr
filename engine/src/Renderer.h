@@ -48,9 +48,8 @@ public:
     void draw(const Camera& camera);
     void cleanup();
 
-    [[nodiscard]] GPUMeshBuffers uploadMesh(
-        std::span<const std::uint32_t> indices,
-        std::span<const Mesh::Vertex> vertices) const;
+    void uploadMesh(const Mesh& cpuMesh, GPUMesh& mesh) const;
+    SkinnedMesh createSkinnedMeshBuffer(MeshId meshId) const;
 
     [[nodiscard]] AllocatedBuffer createBuffer(
         std::size_t allocSize,
@@ -92,6 +91,11 @@ public:
 
     void beginDrawing(const GPUSceneData& sceneData);
     void addDrawCommand(MeshId id, const glm::mat4& transform);
+    void addDrawSkinnedMeshCommand(
+        MeshId id,
+        const SkinnedMesh& skinnedMesh,
+        const glm::mat4& transform,
+        std::span<const glm::mat4> jointMatrices);
     void endDrawing();
 
     Scene loadScene(const std::filesystem::path& path);
@@ -128,15 +132,19 @@ private:
     );
 
     FrameData& getCurrentFrame();
-    void doSkinning(VkCommandBuffer cmd, const GPUMesh& mesh);
+    void doSkinning(
+        VkCommandBuffer cmd,
+        const GPUMesh& mesh,
+        const SkinnedMesh& skinnedMesh,
+        std::uint32_t jointMatricesStartIndex);
     void drawBackground(VkCommandBuffer cmd);
     void drawGeometry(VkCommandBuffer cmd, const Camera& camera);
     VkDescriptorSet uploadSceneData();
     void drawImGui(VkCommandBuffer cmd, VkImageView targetImageView);
 
-    void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function) const;
-
     void sortDrawList();
+
+    void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function) const;
 
 private: //data
     vkb::Instance instance;
@@ -182,10 +190,16 @@ private: //data
     VkPipeline skinningPipeline;
     VkPipelineLayout skinningPipelineLayout;
     struct SkinningPushConstants {
-        std::uint32_t numVertices;
-        VkDeviceAddress inputBuffer;
-        VkDeviceAddress outputBuffer;
-    };
+            VkDeviceAddress jointMatricesBuffer;
+            std::uint32_t jointMatricesStartIndex;
+            std::uint32_t numVertices;
+            VkDeviceAddress inputBuffer;
+            VkDeviceAddress skinningData;
+            VkDeviceAddress outputBuffer;
+        };
+    AllocatedBuffer jointMatricesBuffer;
+    VkDeviceAddress jointMatricesBufferAddress;
+    std::size_t jointMatrixBufferCurrentIndex;
 
     VkPipelineLayout trianglePipelineLayout;
     VkPipeline trianglePipeline;

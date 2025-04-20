@@ -20,7 +20,7 @@ void MeshCache::cleanup(const Renderer& renderer)
     renderer.destroyBuffer(mesh.buffers.indexBuffer);
     renderer.destroyBuffer(mesh.buffers.vertexBuffer);
     if (mesh.hasSkeleton) {
-        renderer.destroyBuffer(mesh.skinnedVertexBuffer);
+        renderer.destroyBuffer(mesh.skinningDataBuffer);
     }
   }
 }

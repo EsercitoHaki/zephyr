@@ -55,14 +55,14 @@ void Game::init()
         createEntitiesFromScene(scene);
     }
 
-    {
-        const auto scene = renderer.loadScene("assets/models/cato.gltf");
-        createEntitiesFromScene(scene);
+    // {
+    //     const auto scene = renderer.loadScene("assets/models/cato.gltf");
+    //     createEntitiesFromScene(scene);
 
-        const glm::vec3 catoPos{6.f, 0.5f, 0.f};
-        auto& cato = findEntityByName("Cato");
-        cato.transform.position = catoPos;
-    }
+    //     const glm::vec3 catoPos{6.f, 0.5f, 0.f};
+    //     auto& cato = findEntityByName("Cato");
+    //     cato.transform.position = catoPos;
+    // }
 
     {
         static const float zNear = 1.f;
@@ -169,6 +169,13 @@ void Game::handleInput(float dt) {
 void Game::update(float dt) {
     cameraController.update(camera, dt);
     updateEntityTransforms();
+
+    for (const auto& ePtr : entities) {
+        auto& e = *ePtr;
+        if (e.hasSkeleton) {
+            e.skeletonAnimator.update(e.skeleton, dt);
+        }
+    }
     updateDevTools(dt);
 }
 
@@ -286,6 +293,14 @@ void Game::updateDevTools(float dt) {
 }
 
 void Game::cleanup() {
+    for (const auto& ePtr : entities) {
+        auto& e = *ePtr;
+        if (e.hasSkeleton) {
+            for (const auto& skinnedMesh : e.skinnedMeshes) {
+                renderer.destroyBuffer(skinnedMesh.skinnedVertexBuffer);
+            }
+        }
+    }
     renderer.cleanup();
 
     glfwDestroyWindow(window);
@@ -320,6 +335,19 @@ Game::EntityId Game::createEntitiesFromNode(
 
     {
         e.meshes = scene.meshes[node.meshIndex].primitives;
+        if (node.skinId != -1) {
+            e.hasSkeleton = true;
+            e.skeleton = scene.skeletons[node.skinId];
+            // FIXME: this is bad - we need to have some sort of cache
+            // and not copy animations everywhere
+            e.animations = scene.animations;
+
+            e.skeletonAnimator.setAnimation(e.skeleton, e.animations.at("Run"));
+            e.skinnedMeshes.reserve(e.meshes.size());
+            for (const auto meshId : e.meshes) {
+                e.skinnedMeshes.push_back(renderer.createSkinnedMeshBuffer(meshId));
+            }
+        }
     }
 
     {
@@ -389,8 +417,16 @@ void Game::generateDrawList() {
 
     for (const auto& ePtr : entities) {
         const auto& e = *ePtr;
-        for (const auto& mesh : e.meshes) {
-            renderer.addDrawCommand(mesh, e.worldTransform);
+        for (std::size_t i = 0; i < e.meshes.size(); ++i) {
+            if (e.hasSkeleton) {
+                renderer.addDrawSkinnedMeshCommand(
+                    e.meshes[i],
+                    e.skinnedMeshes[i],
+                    e.worldTransform,
+                    e.skeletonAnimator.getJointMatrices());
+            } else {
+                renderer.addDrawCommand(e.meshes[i], e.worldTransform);
+            }
         }
     }
 

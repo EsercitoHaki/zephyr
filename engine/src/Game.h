@@ -1,12 +1,17 @@
 #pragma once
 
 #include <memory>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <Graphics/Camera.h>
 
 #include "FreeCameraController.h"
 #include "Renderer.h"
+
+#include <Graphics/SkeletalAnimation.h>
+#include <Graphics/SkeletonAnimator.h>
 
 class GLFWwindow;
 
@@ -27,6 +32,14 @@ class Game {
             std::vector<EntityId> children;
 
             std::vector<MeshId> meshes;
+
+            Skeleton skeleton;
+            bool hasSkeleton{false};
+            std::vector<SkinnedMesh> skinnedMeshes;
+
+            // animation
+            SkeletonAnimator skeletonAnimator;
+            std::unordered_map<std::string, SkeletalAnimation> animations;
         };
 
     public:
