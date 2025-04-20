@@ -32,6 +32,26 @@ class GLFWwindow;
 class Renderer {
 public:
     static constexpr std::size_t FRAME_OVERLAP = 2;
+
+    template<typename T>
+        struct AppendableBuffer {
+        void append(std::span<const T> elements)
+        {
+            assert(size + elements.size() <= capacity);
+            auto arr = (T*)buffer.info.pMappedData;
+            memcpy((void*)&arr[size], elements.data(), elements.size() * sizeof(glm::mat4));
+            size += elements.size();
+        }
+
+        void clear() { size = 0; }
+
+        VkBuffer getVkBuffer() const { return buffer.buffer; }
+
+        AllocatedBuffer buffer;
+        std::size_t capacity{};
+        std::size_t size{0};
+    };
+
     struct FrameData {
         VkCommandPool commandPool;
         VkCommandBuffer mainCommandBuffer;
@@ -41,6 +61,8 @@ public:
         DeletionQueue deletionQueue;
 
         DescriptorAllocatorGrowable frameDescriptors;
+        AppendableBuffer<glm::mat4> jointMatricesBuffer;
+        VkDeviceAddress jointMatricesBufferAddress;
     };
 
 public:
@@ -48,9 +70,8 @@ public:
     void draw(const Camera& camera);
     void cleanup();
 
-    [[nodiscard]] GPUMeshBuffers uploadMesh(
-        std::span<const std::uint32_t> indices,
-        std::span<const Mesh::Vertex> vertices) const;
+    void uploadMesh(const Mesh& cpuMesh, GPUMesh& mesh) const;
+    SkinnedMesh createSkinnedMeshBuffer(MeshId meshId) const;
 
     [[nodiscard]] AllocatedBuffer createBuffer(
         std::size_t allocSize,
@@ -92,6 +113,11 @@ public:
 
     void beginDrawing(const GPUSceneData& sceneData);
     void addDrawCommand(MeshId id, const glm::mat4& transform);
+    void addDrawSkinnedMeshCommand(
+        std::span<const MeshId> meshes,
+        std::span<const SkinnedMesh> skinnedMeshes,
+        const glm::mat4& transform,
+        std::span<const glm::mat4> jointMatrices);
     void endDrawing();
 
     Scene loadScene(const std::filesystem::path& path);
@@ -128,15 +154,15 @@ private:
     );
 
     FrameData& getCurrentFrame();
-    void doSkinning(VkCommandBuffer cmd, const GPUMesh& mesh);
+    void doSkinning(VkCommandBuffer cmd);
     void drawBackground(VkCommandBuffer cmd);
     void drawGeometry(VkCommandBuffer cmd, const Camera& camera);
     VkDescriptorSet uploadSceneData();
     void drawImGui(VkCommandBuffer cmd, VkImageView targetImageView);
 
-    void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function) const;
-
     void sortDrawList();
+
+    void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function) const;
 
 private: //data
     vkb::Instance instance;
@@ -169,8 +195,8 @@ private: //data
     VkCommandBuffer immCommandBuffer;
     VkCommandPool immCommandPool;
 
-    VkPipeline gradientPipeline;
     VkPipelineLayout gradientPipelineLayout;
+    VkPipeline gradientPipeline;
     struct ComputePushConstants {
         glm::vec4 data1;
         glm::vec4 data2;
@@ -179,13 +205,18 @@ private: //data
     };
     ComputePushConstants gradientConstants;
 
-    VkPipeline skinningPipeline;
     VkPipelineLayout skinningPipelineLayout;
+    VkPipeline skinningPipeline;
     struct SkinningPushConstants {
-        std::uint32_t numVertices;
-        VkDeviceAddress inputBuffer;
-        VkDeviceAddress outputBuffer;
-    };
+            VkDeviceAddress jointMatricesBuffer;
+            std::uint32_t jointMatricesStartIndex;
+            std::uint32_t numVertices;
+            VkDeviceAddress inputBuffer;
+            VkDeviceAddress skinningData;
+            VkDeviceAddress outputBuffer;
+        };
+
+    static constexpr std::size_t MAX_JOINT_MATRICES = 5000;
 
     VkPipelineLayout trianglePipelineLayout;
     VkPipeline trianglePipeline;
