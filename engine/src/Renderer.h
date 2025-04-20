@@ -32,6 +32,26 @@ class GLFWwindow;
 class Renderer {
 public:
     static constexpr std::size_t FRAME_OVERLAP = 2;
+
+    template<typename T>
+        struct AppendableBuffer {
+        void append(std::span<const T> elements)
+        {
+            assert(size + elements.size() <= capacity);
+            auto arr = (T*)buffer.info.pMappedData;
+            memcpy((void*)&arr[size], elements.data(), elements.size() * sizeof(glm::mat4));
+            size += elements.size();
+        }
+
+        void clear() { size = 0; }
+
+        VkBuffer getVkBuffer() const { return buffer.buffer; }
+
+        AllocatedBuffer buffer;
+        std::size_t capacity{};
+        std::size_t size{0};
+    };
+
     struct FrameData {
         VkCommandPool commandPool;
         VkCommandBuffer mainCommandBuffer;
@@ -41,6 +61,8 @@ public:
         DeletionQueue deletionQueue;
 
         DescriptorAllocatorGrowable frameDescriptors;
+        AppendableBuffer<glm::mat4> jointMatricesBuffer;
+        VkDeviceAddress jointMatricesBufferAddress;
     };
 
 public:
@@ -92,8 +114,8 @@ public:
     void beginDrawing(const GPUSceneData& sceneData);
     void addDrawCommand(MeshId id, const glm::mat4& transform);
     void addDrawSkinnedMeshCommand(
-        MeshId id,
-        const SkinnedMesh& skinnedMesh,
+        std::span<const MeshId> meshes,
+        std::span<const SkinnedMesh> skinnedMeshes,
         const glm::mat4& transform,
         std::span<const glm::mat4> jointMatrices);
     void endDrawing();
@@ -132,11 +154,7 @@ private:
     );
 
     FrameData& getCurrentFrame();
-    void doSkinning(
-        VkCommandBuffer cmd,
-        const GPUMesh& mesh,
-        const SkinnedMesh& skinnedMesh,
-        std::uint32_t jointMatricesStartIndex);
+    void doSkinning(VkCommandBuffer cmd);
     void drawBackground(VkCommandBuffer cmd);
     void drawGeometry(VkCommandBuffer cmd, const Camera& camera);
     VkDescriptorSet uploadSceneData();
@@ -177,8 +195,8 @@ private: //data
     VkCommandBuffer immCommandBuffer;
     VkCommandPool immCommandPool;
 
-    VkPipeline gradientPipeline;
     VkPipelineLayout gradientPipelineLayout;
+    VkPipeline gradientPipeline;
     struct ComputePushConstants {
         glm::vec4 data1;
         glm::vec4 data2;
@@ -187,8 +205,8 @@ private: //data
     };
     ComputePushConstants gradientConstants;
 
-    VkPipeline skinningPipeline;
     VkPipelineLayout skinningPipelineLayout;
+    VkPipeline skinningPipeline;
     struct SkinningPushConstants {
             VkDeviceAddress jointMatricesBuffer;
             std::uint32_t jointMatricesStartIndex;
@@ -197,9 +215,8 @@ private: //data
             VkDeviceAddress skinningData;
             VkDeviceAddress outputBuffer;
         };
-    AllocatedBuffer jointMatricesBuffer;
-    VkDeviceAddress jointMatricesBufferAddress;
-    std::size_t jointMatrixBufferCurrentIndex;
+
+    static constexpr std::size_t MAX_JOINT_MATRICES = 5000;
 
     VkPipelineLayout trianglePipelineLayout;
     VkPipeline trianglePipeline;
