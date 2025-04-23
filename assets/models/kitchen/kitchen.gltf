@@ -3,6 +3,52 @@
 		"generator":"Khronos glTF Blender I/O v4.4.55",
 		"version":"2.0"
 	},
+	"extensionsUsed":[
+		"KHR_lights_punctual"
+	],
+	"extensionsRequired":[
+		"KHR_lights_punctual"
+	],
+	"extensions":{
+		"KHR_lights_punctual":{
+			"lights":[
+				{
+					"color":[
+						1,
+						1,
+						1
+					],
+					"intensity":683,
+					"type":"directional",
+					"name":"Sun"
+				},
+				{
+					"color":[
+						1,
+						1,
+						1
+					],
+					"intensity":543.5141306588226,
+					"type":"point",
+					"name":"Point"
+				},
+				{
+					"color":[
+						1,
+						1,
+						1
+					],
+					"intensity":543.5141306588226,
+					"spot":{
+						"innerConeAngle":0.3337942263919169,
+						"outerConeAngle":0.39269909262657166
+					},
+					"type":"spot",
+					"name":"Spot"
+				}
+			]
+		}
+	},
 	"scene":0,
 	"scenes":[
 		{
@@ -22,7 +68,10 @@
 				13,
 				14,
 				15,
-				16
+				16,
+				17,
+				18,
+				19
 			]
 		}
 	],
@@ -213,6 +262,63 @@
 				2.874934196472168,
 				0.35993051528930664,
 				-13.124959945678711
+			]
+		},
+		{
+			"extensions":{
+				"KHR_lights_punctual":{
+					"light":0
+				}
+			},
+			"name":"Sun",
+			"rotation":[
+				-0.1499418169260025,
+				0.20680537819862366,
+				0.788175106048584,
+				0.5599366426467896
+			],
+			"translation":[
+				6.932950019836426,
+				6.645365238189697,
+				8.756035804748535
+			]
+		},
+		{
+			"extensions":{
+				"KHR_lights_punctual":{
+					"light":1
+				}
+			},
+			"name":"Point",
+			"rotation":[
+				-0.7071068286895752,
+				0,
+				0,
+				0.7071068286895752
+			],
+			"translation":[
+				6.642930507659912,
+				4.963381767272949,
+				0.27165794372558594
+			]
+		},
+		{
+			"extensions":{
+				"KHR_lights_punctual":{
+					"light":2
+				}
+			},
+			"name":"Spot",
+			"rotation":[
+				-0.5503332018852234,
+				0.11128365993499756,
+				0.021872645244002342,
+				0.8272067308425903
+			],
+			"translation":[
+				6.506522178649902,
+				7.089702606201172,
+				-2.0009965896606445
 			]
 		}
 	],
