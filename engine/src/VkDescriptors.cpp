@@ -124,7 +124,7 @@ VkDescriptorSet DescriptorAllocatorGrowable::allocate(VkDevice device, VkDescrip
 
     VkDescriptorSet ds;
     const VkResult result = vkAllocateDescriptorSets(device, &allocInfo, &ds);
-    // Allocate new pool is ran out of memory
+
     if (result == VK_ERROR_OUT_OF_POOL_MEMORY || result == VK_ERROR_FRAGMENTED_POOL) {
         fullPools.push_back(poolToUse);
 

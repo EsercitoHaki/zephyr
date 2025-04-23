@@ -18,9 +18,12 @@
 #include <imgui.h>
 #include <imgui_impl_glfw.cpp>
 #include <imgui_impl_vulkan.cpp>
+#include <Graphics/FrustumCulling.h>
 #include <Graphics/Scene.h>
+#include <Graphics/ShadowMapping.h>
+#include <Graphics/Skeleton.h>
+
 #include <util/GltfLoader.h>
-#include "Graphics/FrustumCulling.h"
 #include <util/ImageLoader.h>
 namespace
 {
@@ -45,6 +48,7 @@ void Renderer::init(GLFWwindow* window, bool vSync)
     allocateMaterialDataBuffer(1000);
 
     initImGui(window);
+    initCSMData();
 
     gradientConstants = ComputePushConstants{
         .data1 = glm::vec4{239.f / 255.f, 157.f / 255.f, 8.f / 255.f, 1},
@@ -73,7 +77,6 @@ void Renderer::initVulkan(GLFWwindow* window)
         std::exit(1);
     }
 
-    // Create Vulkan surface
     if (!glfwVulkanSupported()) {
         std::cerr << "Vulkan is not supported by your system!" << std::endl;
         std::exit(1);
@@ -85,6 +88,11 @@ void Renderer::initVulkan(GLFWwindow* window)
         std::exit(1);
     }
 
+    const auto deviceFeatures = VkPhysicalDeviceFeatures{
+        .depthClamp = VK_TRUE,
+        .samplerAnisotropy = VK_TRUE,
+    };
+
     const auto features12 = VkPhysicalDeviceVulkan12Features{
         .bufferDeviceAddress = true,
     };
@@ -94,12 +102,20 @@ void Renderer::initVulkan(GLFWwindow* window)
     };
     physicalDevice = vkb::PhysicalDeviceSelector{instance}
                          .set_minimum_version(1, 3)
+                         .add_required_extension(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME)
+                         .set_required_features(deviceFeatures)
                          .set_required_features_12(features12)
                          .set_required_features_13(features13)
                          .set_surface(surface)
                          .select()
                          .value();
-    std::vector<const char*> enabledExtensions = {"VK_EXT_DEBUG_MARKER_EXTENSION_NAME"};
+
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(physicalDevice, &props);
+    assert(props.limits.maxSamplerAnisotropy == 16.f && "TODO: use smaller aniso values");
+
+    std::vector<const char*> enabledExtensions =
+            {VK_EXT_DEBUG_UTILS_EXTENSION_NAME, VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME};
     VkDeviceCreateInfo deviceInfo = {};
     device = vkb::DeviceBuilder{physicalDevice}.build().value();
     graphicsQueue = device.get_queue(vkb::QueueType::graphics).value();
@@ -132,11 +148,22 @@ void Renderer::loadExtensionFunctions()
 
 void Renderer::createSwapchain(std::uint32_t width, std::uint32_t height, bool vSync)
 {
+    const std::array<VkFormat, 2> formats{{
+        VK_FORMAT_B8G8R8A8_SRGB,
+        VK_FORMAT_B8G8R8A8_UNORM,
+    }};
+    auto formatList = VkImageFormatListCreateInfo{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO,
+        .viewFormatCount = 2,
+        .pViewFormats = formats.data(),
+    };
     swapchain = vkb::SwapchainBuilder{device}
+                    .add_pNext(&formatList)
                     .set_desired_format(VkSurfaceFormatKHR{
-                        .format = VK_FORMAT_B8G8R8A8_UNORM,
+                        .format = VK_FORMAT_B8G8R8A8_SRGB,
                         .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
                     })
+                    .set_create_flags(VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR)
                     .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
                     .set_desired_present_mode(vSync ? VK_PRESENT_MODE_FIFO_KHR : VK_PRESENT_MODE_IMMEDIATE_KHR)
                     .set_desired_extent(width, height)
@@ -151,7 +178,7 @@ void Renderer::createSwapchain(std::uint32_t width, std::uint32_t height, bool v
         .depth = 1,
     };
 
-    { // setup draw image
+    {
         drawImage.format = VK_FORMAT_R16G16B16A16_SFLOAT;
         drawImage.extent = drawImageExtent;
 
@@ -184,7 +211,7 @@ void Renderer::createSwapchain(std::uint32_t width, std::uint32_t height, bool v
         deletionQueue.pushFunction([this]() { destroyImage(drawImage); });
     }
 
-    { // setup draw image (depth)
+    {
         depthImage.format = VK_FORMAT_D32_SFLOAT;
         depthImage.extent = drawImageExtent;
 
@@ -307,8 +334,9 @@ void Renderer::initDescriptors()
         writer.updateSet(device, drawImageDescriptors);
     }
 
-    const auto sceneDataBindings = std::array<vkutil::DescriptorLayoutBinding, 1>{{
-        {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER},
+    const auto sceneDataBindings = std::array<vkutil::DescriptorLayoutBinding, 2>{{
+            {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER},
+            {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER},
     }};
     sceneDataDescriptorLayout = vkutil::buildDescriptorSetLayout(
         device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sceneDataBindings);
@@ -347,15 +375,42 @@ void Renderer::initSamplers()
             .magFilter = VK_FILTER_NEAREST,
             .minFilter = VK_FILTER_NEAREST,
         };
-        VK_CHECK(vkCreateSampler(device, &samplerCreateInfo, nullptr, &defaultSamplerNearest));
+        VK_CHECK(vkCreateSampler(device, &samplerCreateInfo, nullptr, &defaultNearestSampler));
+        deletionQueue.pushFunction([this]() { vkDestroySampler(device, defaultNearestSampler, nullptr); });
+    }
+
+    { // init linear sampler
+        const auto samplerCreateInfo = VkSamplerCreateInfo{
+            .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            .magFilter = VK_FILTER_LINEAR,
+            .minFilter = VK_FILTER_LINEAR,
+            .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+            // TODO: make possible to disable anisotropy?
+            .anisotropyEnable = VK_TRUE,
+            .maxAnisotropy = 16.f,
+        };
+        VK_CHECK(vkCreateSampler(device, &samplerCreateInfo, nullptr, &defaultLinearSampler));
+                deletionQueue.pushFunction(
+                    [this]() { vkDestroySampler(device, defaultLinearSampler, nullptr); });
+            }
+
+            { // init shadow map sampler
+                const auto samplerCreateInfo = VkSamplerCreateInfo{
+                    .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                    .magFilter = VK_FILTER_LINEAR,
+                    .minFilter = VK_FILTER_LINEAR,
+                    .compareEnable = VK_TRUE,
+                    .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
+                };
+                VK_CHECK(vkCreateSampler(device, &samplerCreateInfo, nullptr, &defaultShadowMapSampler));
         deletionQueue.pushFunction(
-            [this]() { vkDestroySampler(device, defaultSamplerNearest, nullptr); });
+            [this]() { vkDestroySampler(device, defaultShadowMapSampler, nullptr); });
     }
 }
 
 void Renderer::initDefaultTextures()
 {
-    { // create white texture
+    {
         std::uint32_t white = 0xFFFFFFFF;
         whiteTexture = createImage(
             (void*)&white,
@@ -374,6 +429,7 @@ void Renderer::initPipelines()
     initSkinningPipeline();
     initTrianglePipeline();
     initMeshPipeline();
+    initMeshDepthOnlyPipeline();
 }
 void Renderer::initBackgroundPipelines()
 {
@@ -495,6 +551,44 @@ void Renderer::initMeshPipeline()
         vkDestroyPipeline(device, meshPipeline, nullptr);
     });
 }
+
+void Renderer::initMeshDepthOnlyPipeline()
+{
+    const auto vertexShader = vkutil::loadShaderModule("shaders/mesh_depth_only.vert.spv", device);
+
+    addDebugLabel(vertexShader, "mesh_depth_only.vert");
+
+    const auto bufferRange = VkPushConstantRange{
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .offset = 0,
+        .size = sizeof(DepthOnlyPushConstants),
+    };
+
+    const auto pushConstantRanges = std::array{bufferRange};
+    const auto layouts = std::array{sceneDataDescriptorLayout, meshMaterialLayout};
+    meshDepthOnlyPipelineLayout = vkutil::createPipelineLayout(device, layouts, pushConstantRanges);
+
+    meshDepthOnlyPipeline = PipelineBuilder{meshDepthOnlyPipelineLayout}
+                                .setShaders(vertexShader, VK_NULL_HANDLE)
+                                .setInputTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+                                .setPolygonMode(VK_POLYGON_MODE_FILL)
+                                .setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE)
+                                .setMultisamplingNone()
+                                .disableBlending()
+                                .setDepthFormat(depthImage.format)
+                                .enableDepthClamp()
+                                .enableDepthTest(true, VK_COMPARE_OP_GREATER_OR_EQUAL)
+                                .build(device);
+    addDebugLabel(meshDepthOnlyPipeline, "mesh depth only pipeline");
+
+    vkDestroyShaderModule(device, vertexShader, nullptr);
+
+    deletionQueue.pushFunction([this]() {
+        vkDestroyPipelineLayout(device, meshDepthOnlyPipelineLayout, nullptr);
+        vkDestroyPipeline(device, meshDepthOnlyPipeline, nullptr);
+    });
+}
+
 void Renderer::initImGui(GLFWwindow* window)
 {
     VkDescriptorPoolSize pool_sizes[] =
@@ -520,6 +614,7 @@ void Renderer::initImGui(GLFWwindow* window)
     VK_CHECK(vkCreateDescriptorPool(device, &poolInfo, nullptr, &imguiPool));
     ImGui::CreateContext();
     ImGui_ImplGlfw_InitForVulkan(window, true);
+    const auto format = VK_FORMAT_B8G8R8A8_UNORM;
     auto initInfo = ImGui_ImplVulkan_InitInfo{
         .Instance = instance,
         .PhysicalDevice = physicalDevice,
@@ -535,7 +630,7 @@ void Renderer::initImGui(GLFWwindow* window)
             VkPipelineRenderingCreateInfo{
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
                 .colorAttachmentCount = 1,
-                .pColorAttachmentFormats = &swapchain.image_format,
+                .pColorAttachmentFormats = &format,
             },
         .CheckVkResultFn = [](VkResult res) { assert(res == VK_SUCCESS); },
     };
@@ -545,6 +640,49 @@ void Renderer::initImGui(GLFWwindow* window)
         vkDestroyDescriptorPool(device, imguiPool, nullptr);
     });
 }
+
+void Renderer::initCSMData()
+{
+    // meshDepthOnly pipeline uses depthImage.format for depth
+    assert(depthImage.format == VK_FORMAT_D32_SFLOAT);
+
+    csmShadowMap = createImage(
+        VkExtent3D{(std::uint32_t)shadowMapTextureSize, (std::uint32_t)shadowMapTextureSize, 1},
+        NUM_SHADOW_CASCADES,
+        VK_FORMAT_D32_SFLOAT,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        false);
+    addDebugLabel(csmShadowMap, "CSM shadow map");
+    addDebugLabel(csmShadowMap.imageView, "CSM shadow map view");
+
+    for (int i = 0; i < NUM_SHADOW_CASCADES; ++i) {
+        VkImageView imageView;
+        const auto createInfo = VkImageViewCreateInfo{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = csmShadowMap.image,
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = csmShadowMap.format,
+            .subresourceRange =
+                VkImageSubresourceRange{
+                    .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = (std::uint32_t)i,
+                    .layerCount = 1,
+                },
+        };
+        VK_CHECK(vkCreateImageView(device, &createInfo, nullptr, &csmShadowMapViews[i]));
+        addDebugLabel(csmShadowMapViews[i], "CSM shadow map view");
+    }
+
+    deletionQueue.pushFunction([this]() {
+        destroyImage(csmShadowMap);
+        for (int i = 0; i < NUM_SHADOW_CASCADES; ++i) {
+            vkDestroyImageView(device, csmShadowMapViews[i], nullptr);
+        }
+    });
+}
+
 void Renderer::destroyCommandBuffers()
 {
     for (std::uint32_t i = 0; i < FRAME_OVERLAP; ++i) {
@@ -590,17 +728,29 @@ AllocatedBuffer Renderer::createBuffer(
 
 AllocatedImage Renderer::createImage(
     VkExtent3D size,
+    std::uint32_t numLayers,
     VkFormat format,
     VkImageUsageFlags usage,
     bool mipMap)
 {
-    auto mipLevels = 1;
-
+    std::uint32_t mipLevels = 1;
     if (mipMap) {
-        mipMap = static_cast<uint32_t>(std::floor(std::log2(std::max(size.width, size.height)))) + 1;
+        mipLevels =
+            static_cast<std::uint32_t>(std::floor(std::log2(std::max(size.width, size.height)))) +
+            1;
     }
 
-    const auto imgInfo = vkinit::imageCreateInfo(format, usage, size, mipLevels);
+    const auto imgInfo = VkImageCreateInfo{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = format,
+        .extent = size,
+        .mipLevels = mipLevels,
+        .arrayLayers = numLayers,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = usage,
+    };
 
     const auto allocInfo = VmaAllocationCreateInfo{
         .usage = VMA_MEMORY_USAGE_GPU_ONLY,
@@ -610,20 +760,33 @@ AllocatedImage Renderer::createImage(
     auto image = AllocatedImage{
         .extent = size,
         .format = format,
+        .mipLevels = mipLevels,
     };
 
     VK_CHECK(
         vmaCreateImage(allocator, &imgInfo, &allocInfo, &image.image, &image.allocation, nullptr));
-
+    // create view
     auto aspectFlag = VK_IMAGE_ASPECT_COLOR_BIT;
     if (format == VK_FORMAT_D32_SFLOAT) {
         aspectFlag = VK_IMAGE_ASPECT_DEPTH_BIT;
     }
 
-    auto viewInfo = vkinit::imageViewCreateInfo(format, image.image, aspectFlag);
-    viewInfo.subresourceRange.levelCount = imgInfo.mipLevels;
+    const auto viewCreateInfo = VkImageViewCreateInfo{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = image.image,
+        .viewType = numLayers == 1 ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+        .format = format,
+        .subresourceRange =
+            VkImageSubresourceRange{
+                .aspectMask = static_cast<uint32_t>(aspectFlag),
+                .baseMipLevel = 0,
+                .levelCount = mipLevels,
+                .baseArrayLayer = 0,
+                .layerCount = numLayers,
+            },
+        };
 
-    VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &image.imageView));
+        VK_CHECK(vkCreateImageView(device, &viewCreateInfo, nullptr, &image.imageView));
 
     return image;
 }
@@ -643,6 +806,7 @@ AllocatedImage Renderer::createImage(
 
     const auto image = createImage(
         size,
+        1,
         format,
         usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
         mipMap);
@@ -672,13 +836,22 @@ AllocatedImage Renderer::createImage(
             image.image,
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             1,
-            &copyRegion);
+            &copyRegion
+        );
 
-        vkutil::transitionImage(
-            cmd,
-            image.image,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        if (mipMap) {
+            vkutil::generateMipmaps(
+                cmd,
+                image.image,
+                VkExtent2D{image.extent.width, image.extent.height},
+                image.mipLevels);
+        } else {
+            vkutil::transitionImage(
+                cmd,
+                image.image,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
     });
 
     destroyBuffer(uploadbuffer);
@@ -695,7 +868,7 @@ AllocatedImage Renderer::loadImageFromFile(
     auto data = util::loadImage(path);
     assert(data.pixels);
 
-    auto image = createImage(
+    const auto image = createImage(
         data.pixels,
         VkExtent3D{
             .width = (std::uint32_t)data.width,
@@ -704,7 +877,7 @@ AllocatedImage Renderer::loadImageFromFile(
         },
         format,
         usage,
-        false);
+        mipMap);
 
     addDebugLabel(image, path.c_str());
 
@@ -718,6 +891,18 @@ void Renderer::addDebugLabel(const AllocatedImage& image, const char* label)
         .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
         .objectType = VK_OBJECT_TYPE_IMAGE,
         .objectHandle = (std::uint64_t)image.image,
+        .pObjectName = label,
+    };
+    pfnSetDebugUtilsObjectNameEXT(device, &nameInfo);
+}
+
+void Renderer::addDebugLabel(VkImageView imageView, const char* label)
+{
+    assert(pfnSetDebugUtilsObjectNameEXT);
+    const auto nameInfo = VkDebugUtilsObjectNameInfoEXT{
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+        .objectType = VK_OBJECT_TYPE_IMAGE_VIEW,
+        .objectHandle = (std::uint64_t)imageView,
         .pObjectName = label,
     };
     pfnSetDebugUtilsObjectNameEXT(device, &nameInfo);
@@ -808,7 +993,7 @@ VkDescriptorSet Renderer::writeMaterialData(MaterialId id, const Material& mater
     writer.writeImage(
         1,
         material.diffuseTexture.imageView,
-        defaultSamplerNearest,
+        defaultLinearSampler,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
@@ -949,9 +1134,13 @@ void Renderer::draw(const Camera& camera)
     vkutil::
         transitionImage(cmd, drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
-        beginCmdLabel(cmd, "Skinning");
-        doSkinning(cmd);
-        endCmdLabel(cmd);
+    beginCmdLabel(cmd, "Skinning");
+    doSkinning(cmd);
+    endCmdLabel(cmd);
+
+    beginCmdLabel(cmd, "Draw CSM");
+    drawShadowMaps(cmd, camera);
+    endCmdLabel(cmd);
 
     beginCmdLabel(cmd, "Draw background");
 
@@ -999,7 +1188,15 @@ void Renderer::draw(const Camera& camera)
 
     beginCmdLabel(cmd, "Draw Dear ImGui");
 
-    drawImGui(cmd, swapchainImageViews[swapchainImageIndex]);
+    {
+        VkImageView imguiImageView;
+        const auto imageViewCreateInfo = vkinit::imageViewCreateInfo(
+            VK_FORMAT_B8G8R8A8_UNORM, swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT);
+        VK_CHECK(vkCreateImageView(device, &imageViewCreateInfo, nullptr, &imguiImageView));
+        drawImGui(cmd, imguiImageView);
+        currentFrame.deletionQueue.pushFunction(
+            [this, imguiImageView]() { vkDestroyImageView(device, imguiImageView, nullptr); });
+    }
 
     endCmdLabel(cmd);
 
@@ -1087,6 +1284,139 @@ void Renderer::doSkinning(VkCommandBuffer cmd)
     vkCmdPipelineBarrier2(cmd, &dependencyInfo);
 }
 
+void Renderer::drawShadowMaps(VkCommandBuffer cmd, const Camera& camera)
+{
+    vkutil::transitionImage(
+        cmd,
+        csmShadowMap.image,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL
+    );
+
+    std::array<float, NUM_SHADOW_CASCADES> percents = {0.3f, 0.8f, 1.f};
+    if (camera.getZFar() > 100.f) {
+        percents = {0.01f, 0.04f, 0.15f};
+    }
+
+    std::array<float, NUM_SHADOW_CASCADES> cascadeFarPlaneZs{};
+    std::array<glm::mat4, NUM_SHADOW_CASCADES> csmLightSpaceTMs{};
+
+    for (int i = 0; i < NUM_SHADOW_CASCADES; ++i) {
+        float zNear = i == 0 ? camera.getZNear() : camera.getZNear() * percents[i - 1];
+        float zFar = camera.getZFar() * percents[i];
+        cascadeFarPlaneZs[i] = zFar;
+
+        // create subfustrum by copying everything about the main camera,
+        // but changing zFar
+        Camera subFrustumCamera;
+        subFrustumCamera.setPosition(camera.getPosition());
+        subFrustumCamera.setHeading(camera.getHeading());
+        subFrustumCamera.init(camera.getFOVX(), zNear, zFar, 1.f);
+        // NOTE: this camera doesn't use inverse depth because otherwise
+        // calculateFrustumCornersWorldSpace doesn't work properly
+
+        const auto corners =
+            edge::calculateFrustumCornersWorldSpace(subFrustumCamera.getViewProj());
+        const auto csmCamera = calculateCSMCamera(
+            corners, glm::vec3{sceneData.sunlightDirection}, shadowMapTextureSize);
+        csmLightSpaceTMs[i] = csmCamera.getViewProj();
+
+        const auto depthAttachment = vkinit::
+            depthAttachmentInfo(csmShadowMapViews[i], VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+        const auto renderInfo = vkinit::renderingInfo(
+            VkExtent2D{(std::uint32_t)shadowMapTextureSize, (std::uint32_t)shadowMapTextureSize},
+            nullptr,
+            &depthAttachment);
+        vkCmdBeginRendering(cmd, &renderInfo);
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshDepthOnlyPipeline);
+
+        const auto viewport = VkViewport{
+            .x = 0,
+            .y = 0,
+            .width = shadowMapTextureSize,
+            .height = shadowMapTextureSize,
+            .minDepth = 0.f,
+            .maxDepth = 1.f,
+        };
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+        const auto scissor = VkRect2D{
+            .offset = {},
+            .extent = {(std::uint32_t)shadowMapTextureSize, (std::uint32_t)shadowMapTextureSize},
+        };
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+        const auto frustum = edge::createFrustumFromCamera(csmCamera);
+        auto prevMeshId = NULL_MESH_ID;
+
+        // FIXME: this is sorted by material first so might be not the most efficient
+        // we can store by mesh here and do many indexed draws here potentially
+        for (const auto& dcIdx : sortedDrawCommands) {
+            const auto& dc = drawCommands[dcIdx];
+            // hack: don't cull big objects, because shadows from them might disappear
+            if (false && dc.worldBoundingSphere.radius < 2.f &&
+                !edge::isInFrustum(frustum, dc.worldBoundingSphere)) {
+                continue;
+            }
+
+            const auto& mesh = meshCache.getMesh(dc.meshId);
+
+            if (dc.meshId != prevMeshId) {
+                prevMeshId = dc.meshId;
+                vkCmdBindIndexBuffer(cmd, mesh.buffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+            }
+
+            const auto pushConstants = DepthOnlyPushConstants{
+                .mvp = csmLightSpaceTMs[i] * dc.transformMatrix,
+                .vertexBuffer = dc.skinnedMesh ? dc.skinnedMesh->skinnedVertexBufferAddress :
+                                                 mesh.buffers.vertexBufferAddress,
+            };
+            vkCmdPushConstants(
+                cmd,
+                meshDepthOnlyPipelineLayout,
+                VK_SHADER_STAGE_VERTEX_BIT,
+                0,
+                sizeof(DepthOnlyPushConstants),
+                &pushConstants);
+
+            vkCmdDrawIndexed(cmd, mesh.numIndices, 1, 0, 0, 0);
+        }
+
+        vkCmdEndRendering(cmd);
+    }
+
+    sceneData.cascadeFarPlaneZs = glm::vec4{
+        cascadeFarPlaneZs[0],
+        cascadeFarPlaneZs[1],
+        cascadeFarPlaneZs[2],
+        0.f,
+    };
+    sceneData.csmLightSpaceTMs = csmLightSpaceTMs;
+
+    const auto memoryBarrier = VkMemoryBarrier2{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+        .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
+    };
+
+    const auto dependencyInfo = VkDependencyInfo{
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .memoryBarrierCount = 1,
+        .pMemoryBarriers = &memoryBarrier,
+    };
+
+    vkCmdPipelineBarrier2(cmd, &dependencyInfo);
+
+    vkutil::transitionImage(
+        cmd,
+        csmShadowMap.image,
+        VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL);
+}
+
 void Renderer::drawBackground(VkCommandBuffer cmd)
 {
     /* auto flash = std::abs(std::sin(frameNumber / 120.f));
@@ -1162,7 +1492,7 @@ void Renderer::drawGeometry(VkCommandBuffer cmd, const Camera& camera)
             continue;
         }
 
-        auto& mesh = meshCache.getMesh(dc.meshId);
+        const auto& mesh = meshCache.getMesh(dc.meshId);
         if (mesh.materialId != prevMaterialIdx) {
             prevMaterialIdx = mesh.materialId;
 
@@ -1220,6 +1550,12 @@ VkDescriptorSet Renderer::uploadSceneData()
     DescriptorWriter writer;
     writer.writeBuffer(
         0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    writer.writeImage(
+        1,
+        csmShadowMap.imageView,
+        defaultShadowMapSampler,
+        VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     writer.updateSet(device, sceneDescriptor);
 
     return sceneDescriptor;

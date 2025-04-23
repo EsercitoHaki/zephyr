@@ -141,10 +141,14 @@ PipelineBuilder& PipelineBuilder::setShaders(
 {
     shaderStages.clear();
 
-    shaderStages.push_back(
+    if (vertexShader) {
+        shaderStages.push_back(
         vkinit::pipelineShaderStageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT, vertexShader));
-    shaderStages.push_back(
+    }
+    if (fragmentShader) {
+        shaderStages.push_back(
         vkinit::pipelineShaderStageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT, fragmentShader));
+    }
 
     return *this;
 }
@@ -205,22 +209,29 @@ PipelineBuilder& PipelineBuilder::setColorAttachmentFormat(VkFormat format)
 
 PipelineBuilder& PipelineBuilder::enableDepthTest(bool depthWriteEnable, VkCompareOp op)
 {
-  depthStencil.depthTestEnable = VK_TRUE;
-  depthStencil.depthWriteEnable = depthWriteEnable;
-  depthStencil.depthCompareOp = op;
-  depthStencil.depthBoundsTestEnable = VK_FALSE;
-  depthStencil.stencilTestEnable = VK_FALSE;
-  depthStencil.front = {};
-  depthStencil.back = {};
-  depthStencil.minDepthBounds = 0.f;
-  depthStencil.maxDepthBounds = 1.f;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = depthWriteEnable;
+    depthStencil.depthCompareOp = op;
+    depthStencil.depthBoundsTestEnable = VK_FALSE;
+    depthStencil.stencilTestEnable = VK_FALSE;
+    depthStencil.front = {};
+    depthStencil.back = {};
+    depthStencil.minDepthBounds = 0.f;
+    depthStencil.maxDepthBounds = 1.f;
 
-  return *this;
+    return *this;
 }
 
 PipelineBuilder& PipelineBuilder::setDepthFormat(VkFormat format)
 {
     renderInfo.depthAttachmentFormat = format;
+
+    return *this;
+}
+
+PipelineBuilder& PipelineBuilder::enableDepthClamp()
+{
+    rasterizer.depthClampEnable = true;
 
     return *this;
 }

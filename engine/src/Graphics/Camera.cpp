@@ -14,7 +14,7 @@ void Camera::init(float fovX, float zNear, float zFar, float aspectRatio)
     this->zNear = zNear;
     this->aspectRatio = aspectRatio;
 
-    setUseInverseDepth(true);
+    //setUseInverseDepth(true);
     setClipSpaceYDown(true);
 
     if (useInverseDepth) {
@@ -40,7 +40,17 @@ void Camera::initOrtho(float xScale, float yScale, float zNear, float zFar)
     this->zNear = zNear;
     aspectRatio = xScale / yScale;
 
-    projection = glm::ortho(-xScale, xScale, -yScale, yScale, zNear, zFar);
+    setClipSpaceYDown(true);
+
+    if (useInverseDepth) {
+        projection = glm::ortho(-xScale, xScale, -yScale, yScale, zFar, zNear);
+    } else {
+        projection = glm::ortho(-xScale, xScale, -yScale, yScale, zNear, zFar);
+    }
+
+    if (clipSpaceYDown) {
+        projection[1][1] *= -1;
+    }
 }
 
 void Camera::initOrtho2D(const glm::vec2& size, float zNear, float zFar, OriginType origin)

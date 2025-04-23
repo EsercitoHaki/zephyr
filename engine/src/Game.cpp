@@ -51,13 +51,14 @@ void Game::init()
     renderer.init(window, vSync);
 
     {
-        const auto scene = renderer.loadScene("assets/models/kitchen/kitchen.gltf");
+        const auto scene = renderer.loadScene("assets/levels/kitchen/Untitled.gltf");
+        // const auto scene = renderer.loadScene("assets/levels/city/city.gltf");
         createEntitiesFromScene(scene);
     }
 
     {
         const auto scene = renderer.loadScene("assets/models/cato.gltf");
-        { // create player
+        {
             createEntitiesFromScene(scene);
 
             const glm::vec3 catoPos{5.f, 0.5f, 0.f};
@@ -67,7 +68,7 @@ void Game::init()
             cato.skeletonAnimator.setAnimation(cato.skeleton, cato.animations.at("Run"));
         }
 
-        { // create second cato
+        {
             createEntitiesFromScene(scene);
 
             const glm::vec3 catoPos{6.f, 0.5f, 0.f};
@@ -78,7 +79,7 @@ void Game::init()
             cato.skeletonAnimator.setAnimation(cato.skeleton, cato.animations.at("Walk"));
         }
 
-        { // create third cato
+        {
             createEntitiesFromScene(scene);
 
             const glm::vec3 catoPos{4.f, 0.5f, 0.f};
@@ -96,6 +97,7 @@ void Game::init()
         static const float fovX = glm::radians(45.f);
         static const float aspectRatio = (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT;
 
+        camera.setUseInverseDepth(true);
         camera.init(fovX, zNear, zFar, aspectRatio);
 
         const auto startPos = glm::vec3{8.9f, 4.09f, 8.29f};
@@ -103,6 +105,9 @@ void Game::init()
     }
 
     cameraController.setYawPitch(-2.5f, 0.2f);
+    const auto startPos = glm::vec3{-48.8440704, 5.05302525, 5.56558323};
+    camera.setPosition(startPos);
+    cameraController.setYawPitch(3.92699075, 0.523598909);
 
     sunlightDir = glm::vec4{0.371477008, 0.470861048, 0.80018419, 0.f};
     sunlightColorAndIntensity = glm::vec4{213.f / 255.f, 136.f / 255.f, 49.f / 255.f, 0.6f};
@@ -364,8 +369,7 @@ Game::EntityId Game::createEntitiesFromNode(
         if (node.skinId != -1) {
             e.hasSkeleton = true;
             e.skeleton = scene.skeletons[node.skinId];
-            // FIXME: this is bad - we need to have some sort of cache
-            // and not copy animations everywhere
+
             e.animations = scene.animations;
 
             e.skinnedMeshes.reserve(e.meshes.size());

@@ -17,6 +17,7 @@ add_executable(game
     Graphics/Camera.cpp
     Graphics/FrustumCulling.cpp
     Graphics/Mesh.cpp
+    Graphics/ShadowMapping.cpp
     Graphics/SkeletonAnimator.cpp
     Graphics/Texture.cpp
 
@@ -75,10 +76,13 @@ set(SHADERS
     colored_triangle.frag
     skinning.comp
     mesh.vert
+    mesh_depth_only.vert
     mesh.frag
     gradient.comp
 )
 list(TRANSFORM SHADERS PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/shaders/")
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/shaders")
 
 target_shaders(game ${SHADERS})
 

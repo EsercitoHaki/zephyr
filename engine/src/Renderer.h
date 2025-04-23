@@ -15,6 +15,7 @@
 
 #include <glm/vec4.hpp>
 
+#include <Graphics/Camera.h>
 #include <Graphics/Mesh.h>
 #include <Graphics/Scene.h>
 
@@ -24,8 +25,6 @@
 
 struct Scene;
 struct SceneNode;
-
-class Camera;
 
 class GLFWwindow;
 
@@ -96,6 +95,7 @@ public:
     );
 
     void addDebugLabel(const AllocatedImage& image, const char* label);
+    void addDebugLabel(VkImageView imageView, const char* label);
     void addDebugLabel(const VkShaderModule& shader, const char* label);
     void addDebugLabel(const VkPipeline& pipeline, const char* label);
     void addDebugLabel(const AllocatedBuffer& buffer, const char* label);
@@ -140,14 +140,18 @@ private:
     void initSkinningPipeline();
     void initTrianglePipeline();
     void initMeshPipeline();
+    void initMeshDepthOnlyPipeline();
 
     void initImGui(GLFWwindow* window);
+
+    void initCSMData();
 
     void destroyCommandBuffers();
     void destroySyncStructures();
 
     AllocatedImage createImage(
         VkExtent3D size,
+        std::uint32_t numLayers,
         VkFormat format,
         VkImageUsageFlags usage,
         bool mipMap
@@ -155,6 +159,7 @@ private:
 
     FrameData& getCurrentFrame();
     void doSkinning(VkCommandBuffer cmd);
+    void drawShadowMaps(VkCommandBuffer cmd, const Camera& camera);
     void drawBackground(VkCommandBuffer cmd);
     void drawGeometry(VkCommandBuffer cmd, const Camera& camera);
     VkDescriptorSet uploadSceneData();
@@ -235,9 +240,20 @@ private: //data
 
     Scene scene;
 
-    VkSampler defaultSamplerNearest;
+    VkSampler defaultNearestSampler;
+    VkSampler defaultLinearSampler;
+    VkSampler defaultShadowMapSampler;
 
     AllocatedImage whiteTexture;
+
+    AllocatedImage csmShadowMap;
+    float shadowMapTextureSize{4096.f};
+    static const int NUM_SHADOW_CASCADES = 3;
+    std::array<Camera, NUM_SHADOW_CASCADES> cascadeCameras;
+    std::array<VkImageView, NUM_SHADOW_CASCADES> csmShadowMapViews;
+
+    VkPipelineLayout meshDepthOnlyPipelineLayout;
+    VkPipeline meshDepthOnlyPipeline;
 
     std::vector<DrawCommand> drawCommands;
     std::vector<std::size_t> sortedDrawCommands;

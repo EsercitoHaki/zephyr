@@ -237,7 +237,7 @@ void loadMaterial(const util::LoadContext &ctx, Material &material,
                   const std::filesystem::path &diffusePath) {
   if (!diffusePath.empty()) {
     // TODO: use texture cache and don't load same textures
-    material.diffuseTexture = ctx.renderer.loadImageFromFile(diffusePath, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_USAGE_SAMPLED_BIT, false);
+    material.diffuseTexture = ctx.renderer.loadImageFromFile(diffusePath, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_USAGE_SAMPLED_BIT, true);
 
     material.hasDiffuseTexture = true;
 
