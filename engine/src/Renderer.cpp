@@ -85,6 +85,8 @@ void Renderer::initVulkan(GLFWwindow* window)
         std::exit(1);
     }
 
+    const auto deviceFeatures = VkPhysicalDeviceFeatures{.samplerAnisotropy = VK_TRUE};
+
     const auto features12 = VkPhysicalDeviceVulkan12Features{
         .bufferDeviceAddress = true,
     };
@@ -94,11 +96,16 @@ void Renderer::initVulkan(GLFWwindow* window)
     };
     physicalDevice = vkb::PhysicalDeviceSelector{instance}
                          .set_minimum_version(1, 3)
+                         .set_required_features(deviceFeatures)
                          .set_required_features_12(features12)
                          .set_required_features_13(features13)
                          .set_surface(surface)
                          .select()
                          .value();
+
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(physicalDevice, &props);
+    assert(props.limits.maxSamplerAnisotropy == 16.f && "TODO: use smaller aniso values");
     std::vector<const char*> enabledExtensions = {"VK_EXT_DEBUG_MARKER_EXTENSION_NAME"};
     VkDeviceCreateInfo deviceInfo = {};
     device = vkb::DeviceBuilder{physicalDevice}.build().value();
@@ -351,6 +358,21 @@ void Renderer::initSamplers()
         deletionQueue.pushFunction(
             [this]() { vkDestroySampler(device, defaultSamplerNearest, nullptr); });
     }
+
+    { // init linear sampler
+            const auto samplerCreateInfo = VkSamplerCreateInfo{
+                .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                .magFilter = VK_FILTER_LINEAR,
+                .minFilter = VK_FILTER_LINEAR,
+                .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+                // TODO: make possible to disable anisotropy?
+                .anisotropyEnable = VK_TRUE,
+                .maxAnisotropy = 16.f,
+            };
+            VK_CHECK(vkCreateSampler(device, &samplerCreateInfo, nullptr, &defaultSamplerLinear));
+            deletionQueue.pushFunction(
+                [this]() { vkDestroySampler(device, defaultSamplerLinear, nullptr); });
+        }
 }
 
 void Renderer::initDefaultTextures()
@@ -594,10 +616,9 @@ AllocatedImage Renderer::createImage(
     VkImageUsageFlags usage,
     bool mipMap)
 {
-    auto mipLevels = 1;
-
+    std::uint32_t mipLevels = 1;
     if (mipMap) {
-        mipMap = static_cast<uint32_t>(std::floor(std::log2(std::max(size.width, size.height)))) + 1;
+        mipLevels = static_cast<std::uint32_t>(std::floor(std::log2(std::max(size.width, size.height)))) + 1;
     }
 
     const auto imgInfo = vkinit::imageCreateInfo(format, usage, size, mipLevels);
@@ -610,6 +631,7 @@ AllocatedImage Renderer::createImage(
     auto image = AllocatedImage{
         .extent = size,
         .format = format,
+        .mipLevels = mipLevels,
     };
 
     VK_CHECK(
@@ -674,11 +696,19 @@ AllocatedImage Renderer::createImage(
             1,
             &copyRegion);
 
-        vkutil::transitionImage(
-            cmd,
-            image.image,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        if (mipMap) {
+                    vkutil::generateMipmaps(
+                        cmd,
+                        image.image,
+                        VkExtent2D{image.extent.width, image.extent.height},
+                        image.mipLevels);
+                } else {
+                    vkutil::transitionImage(
+                        cmd,
+                        image.image,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                }
     });
 
     destroyBuffer(uploadbuffer);
@@ -695,7 +725,7 @@ AllocatedImage Renderer::loadImageFromFile(
     auto data = util::loadImage(path);
     assert(data.pixels);
 
-    auto image = createImage(
+    const auto image = createImage(
         data.pixels,
         VkExtent3D{
             .width = (std::uint32_t)data.width,
@@ -704,7 +734,7 @@ AllocatedImage Renderer::loadImageFromFile(
         },
         format,
         usage,
-        false);
+        mipMap);
 
     addDebugLabel(image, path.c_str());
 
@@ -808,7 +838,7 @@ VkDescriptorSet Renderer::writeMaterialData(MaterialId id, const Material& mater
     writer.writeImage(
         1,
         material.diffuseTexture.imageView,
-        defaultSamplerNearest,
+        defaultSamplerLinear,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 

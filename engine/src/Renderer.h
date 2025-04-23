@@ -236,7 +236,7 @@ private: //data
     Scene scene;
 
     VkSampler defaultSamplerNearest;
-
+    VkSampler defaultSamplerLinear;
     AllocatedImage whiteTexture;
 
     std::vector<DrawCommand> drawCommands;

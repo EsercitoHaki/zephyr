@@ -11,6 +11,7 @@ struct AllocatedImage {
     VmaAllocation allocation;
     VkExtent3D extent;
     VkFormat format;
+    std::uint32_t mipLevels{1};
 };
 struct AllocatedBuffer {
     VkBuffer buffer{VK_NULL_HANDLE};
