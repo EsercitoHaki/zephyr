@@ -25,3 +25,6 @@
 [submodule "engine/libs/SDL"]
 	path = engine/libs/SDL
 	url = https://github.com/libsdl-org/SDL
+[submodule "engine/libs/tracy"]
+	path = engine/libs/tracy
+	url = https://github.com/wolfpld/tracy
